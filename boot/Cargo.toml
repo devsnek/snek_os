@@ -1,0 +1,12 @@
+[package]
+name = "boot"
+version = "0.1.0"
+authors = ["snek"]
+edition = "2021"
+
+[[bin]]
+name = "boot"
+
+[dependencies]
+bootloader-locator = "0.0.4"
+locate-cargo-manifest = "0.2.2"
