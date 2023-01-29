@@ -1,8 +1,7 @@
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind, MemoryRegions};
 use x86_64::{
     structures::paging::{
-        mapper::MapperAllSizes,
-        FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
+        mapper::MapperAllSizes, FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
     },
     PhysAddr, VirtAddr,
 };
@@ -36,7 +35,7 @@ unsafe fn active_level_4_table(physical_memory_offset: u64) -> &'static mut Page
     let (level_4_table_frame, _) = Cr3::read();
 
     let phys = level_4_table_frame.start_address();
-    let virt = VirtAddr::new(phys.as_u64() + physical_memory_offset);
+    let virt = VirtAddr::new(physical_memory_offset) + phys.as_u64();
     let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
 
     &mut *page_table_ptr // unsafe

@@ -28,8 +28,6 @@ fn init_heap(
         Page::range_inclusive(heap_start_page, heap_end_page)
     };
 
-    dbg!(page_range);
-
     for page in page_range {
         let frame = frame_allocator
             .allocate_frame()

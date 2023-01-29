@@ -1,8 +1,5 @@
 fn main() {
-    for file in [
-        "logo",
-        "logo_text",
-    ] {
+    for file in ["logo", "logo_text"] {
         let mut buf: Vec<u8> = Vec::new();
 
         println!("cargo:rerun-if-changed=./{}.png", file);
