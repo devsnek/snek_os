@@ -1,7 +1,7 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use core::fmt::Write;
 use noto_sans_mono_bitmap::{
-    get_raster, get_raster_width, FontWeight, RasterHeight, RasterizedChar,
+    get_raster, FontWeight, RasterHeight, RasterizedChar,
 };
 use spin::Mutex;
 
@@ -56,14 +56,14 @@ const LINE_SPACING: usize = 2;
 const LETTER_SPACING: usize = 0;
 const BORDER_PADDING: usize = 1;
 const CHAR_RASTER_HEIGHT: RasterHeight = RasterHeight::Size16;
-const CHAR_RASTER_WIDTH: usize = get_raster_width(FontWeight::Regular, CHAR_RASTER_HEIGHT);
 const BACKUP_CHAR: char = '�';
 const FONT_WEIGHT: FontWeight = FontWeight::Regular;
+const LINE_HEIGHT: usize = CHAR_RASTER_HEIGHT.val() + LINE_SPACING;
 
 impl Writer {
     fn newline(&mut self) {
-        self.y_pos += CHAR_RASTER_HEIGHT.val() + LINE_SPACING;
-        self.carriage_return()
+        self.y_pos += LINE_HEIGHT;
+        self.carriage_return();
     }
 
     fn carriage_return(&mut self) {
@@ -74,6 +74,24 @@ impl Writer {
         self.x_pos = BORDER_PADDING;
         self.y_pos = BORDER_PADDING;
         self.buffer.fill(0);
+    }
+
+    fn scroll(&mut self) {
+        let bytes_per_pixel = self.info.bytes_per_pixel;
+
+        let next_line_offset = (self.info.stride * LINE_HEIGHT) * bytes_per_pixel;
+
+        let pixel_height = self.info.height - LINE_HEIGHT;
+        let pixels = self.info.stride * pixel_height;
+        let bytes = pixels * bytes_per_pixel;
+
+        unsafe {
+            core::ptr::copy(
+                self.buffer.as_ptr().add(next_line_offset),
+                self.buffer.as_mut_ptr(),
+                bytes,
+            );
+        }
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, mut r: u8, mut g: u8, mut b: u8, a: u8) {
@@ -130,32 +148,34 @@ impl Writer {
         let _ = unsafe { core::ptr::read_volatile(&self.buffer[byte_offset]) };
     }
 
-    fn write_rendered_char(&mut self, rendered_char: RasterizedChar) {
-        for (y, row) in rendered_char.raster().iter().enumerate() {
-            for (x, byte) in row.iter().enumerate() {
-                let r = *byte;
-                let g = *byte / 2;
-                let b = *byte;
-                self.write_pixel(self.x_pos + x, self.y_pos + y, r, g, b, 255);
-            }
-        }
-        self.x_pos += rendered_char.width() + LETTER_SPACING;
-    }
-
     fn write_char(&mut self, c: char) {
         match c {
             '\n' => self.newline(),
             '\r' => self.carriage_return(),
             c => {
-                let new_xpos = self.x_pos + CHAR_RASTER_WIDTH;
+                let rendered_char = get_char_raster(c);
+                let width = rendered_char.width() + LETTER_SPACING;
+
+                let new_xpos = self.x_pos + width;
                 if new_xpos >= self.info.width {
                     self.newline();
                 }
-                let new_ypos = self.y_pos + CHAR_RASTER_HEIGHT.val() + BORDER_PADDING;
-                if new_ypos >= self.info.height {
-                    self.clear();
+
+                if self.y_pos + LINE_HEIGHT >= self.info.height {
+                    self.scroll();
+                    self.y_pos -= LINE_HEIGHT;
                 }
-                self.write_rendered_char(get_char_raster(c));
+
+                for (y, row) in rendered_char.raster().iter().enumerate() {
+                    for (x, byte) in row.iter().enumerate() {
+                        let r = *byte;
+                        let g = *byte / 2;
+                        let b = *byte;
+                        self.write_pixel(self.x_pos + x, self.y_pos + y, r, g, b, 255);
+                    }
+                }
+
+                self.x_pos += width;
             }
         }
     }
