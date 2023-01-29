@@ -1,23 +1,11 @@
-use bootloader::boot_info::{MemoryRegionKind, MemoryRegions, MemoryRegion};
+use bootloader_api::info::{MemoryRegion, MemoryRegionKind, MemoryRegions};
 use x86_64::{
     structures::paging::{
-        mapper::{MapperAllSizes, PageTableFrameMapping},
-        FrameAllocator, MappedPageTable, PageTable, PhysFrame, Size4KiB,
+        mapper::MapperAllSizes,
+        FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
     },
     PhysAddr, VirtAddr,
 };
-
-struct PhysicalToVirtualFrameMapping {
-    physical_memory_offset: u64,
-}
-
-unsafe impl PageTableFrameMapping for PhysicalToVirtualFrameMapping {
-    fn frame_to_pointer(&self, frame: PhysFrame) -> *mut PageTable {
-        let phys = frame.start_address().as_u64();
-        let virt = VirtAddr::new(phys + self.physical_memory_offset);
-        virt.as_mut_ptr()
-    }
-}
 
 /// Initialize a new MappedPageTable.
 ///
@@ -26,11 +14,14 @@ unsafe impl PageTableFrameMapping for PhysicalToVirtualFrameMapping {
 /// `physical_memory_offset`. Also, this function must be only called once
 /// to avoid aliasing `&mut` references (which is undefined behavior).
 pub unsafe fn init(physical_memory_offset: u64) -> impl MapperAllSizes {
+    println!("[MEMORY] initializing");
+
     let level_4_table = active_level_4_table(physical_memory_offset);
-    let phys_to_virt = PhysicalToVirtualFrameMapping {
-        physical_memory_offset,
-    };
-    MappedPageTable::new(level_4_table, phys_to_virt)
+    let table = OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset));
+
+    println!("[MEMORY] initialized");
+
+    table
 }
 
 /// Returns a mutable reference to the active level 4 table.

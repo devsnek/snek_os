@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::framebuffer::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => ($crate::arch::_print(format_args!($($arg)*)));
 }
 
 #[macro_export]

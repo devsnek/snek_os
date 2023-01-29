@@ -139,7 +139,11 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 }
 
 pub fn init() {
+    println!("[INTERRUPTS] initializing");
+
     IDT.load();
     unsafe { PICS.lock().initialize() };
     x86_64::instructions::interrupts::enable();
+
+    println!("[INTERRUPTS] initialized");
 }

@@ -1,26 +1,14 @@
 [package]
 name = "snek_os"
 version = "0.1.0"
-authors = ["Gus Caplan <me@gus.host>"]
-edition = "2018"
-
-[dependencies]
-spin = "0.9"
-lazy_static = { version = "1.4", features = ["spin_no_std"] }
-linked_list_allocator = "0.10"
-pc-keyboard = "0.5"
-crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
-conquer-once = { version = "0.3", default-features = false }
-noto-sans-mono-bitmap = "0.2"
-
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-bootloader = "0.10"
-x86_64 = "0.14"
-pic8259 = "0.10"
+edition = "2021"
 
 [build-dependencies]
-cc = "1.0"
+bootloader = "0.11"
+snek_kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
+
+[dependencies]
+ovmf-prebuilt = "0.1.0-alpha.1"
 
 [workspace]
-members = ["boot"]
+members = ["kernel"]

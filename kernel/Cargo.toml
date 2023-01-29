@@ -1,0 +1,23 @@
+[package]
+name = "snek_kernel"
+version = "0.1.0"
+authors = ["Gus Caplan <me@gus.host>"]
+edition = "2021"
+
+[dependencies]
+spin = "0.9"
+lazy_static = { version = "1.4", features = ["spin_no_std"] }
+linked_list_allocator = "0.10"
+pc-keyboard = "0.5"
+crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+conquer-once = { version = "0.3", default-features = false }
+noto-sans-mono-bitmap = "0.2"
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+x86_64 = "0.14"
+bootloader_api = "0.11"
+pic8259 = "0.10"
+
+[build-dependencies]
+image = { version = "0.24", default-features = false, features = ["png"] }

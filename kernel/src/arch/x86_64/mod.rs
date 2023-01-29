@@ -1,22 +1,28 @@
 mod allocator;
+mod framebuffer;
 mod gdt;
 mod interrupts;
 mod memory;
 mod mode;
 
-fn kernel_start(boot_info: &'static mut bootloader::BootInfo) -> ! {
+fn kernel_start(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
-        crate::framebuffer::init(framebuffer.info(), framebuffer.buffer_mut());
+        framebuffer::init(framebuffer.info(), framebuffer.buffer_mut());
     }
 
     gdt::init();
     interrupts::init();
-    allocator::init(boot_info.physical_memory_offset.into(), &mut boot_info.memory_regions);
+    allocator::init(
+        boot_info.physical_memory_offset.into(),
+        &mut boot_info.memory_regions,
+    );
 
     crate::main();
 }
 
-bootloader::entry_point!(kernel_start);
+bootloader_api::entry_point!(kernel_start);
+
+pub(crate) use framebuffer::_print;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

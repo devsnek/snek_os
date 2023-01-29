@@ -90,6 +90,8 @@ pub struct Selectors {
 }
 
 pub fn init() {
+    println!("[GDT] initializing");
+
     GDT.0.load();
 
     unsafe {
@@ -103,4 +105,6 @@ pub fn init() {
         CS::set_reg(GDT.1.kernel_code_selector);
         load_tss(GDT.1.tss_selector);
     }
+
+    println!("[GDT] initialized");
 }

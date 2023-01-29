@@ -18,6 +18,8 @@ fn init_heap(
     mapper: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) -> Result<(), MapToError<Size4KiB>> {
+    println!("[HEAP] initializing");
+
     let page_range = {
         let heap_start = VirtAddr::new(HEAP_START as u64);
         let heap_end = heap_start + HEAP_SIZE - 1u64;
@@ -25,6 +27,8 @@ fn init_heap(
         let heap_end_page = Page::containing_address(heap_end);
         Page::range_inclusive(heap_start_page, heap_end_page)
     };
+
+    dbg!(page_range);
 
     for page in page_range {
         let frame = frame_allocator
@@ -36,15 +40,23 @@ fn init_heap(
 
     unsafe { ALLOCATOR.lock().init(HEAP_START, HEAP_SIZE) };
 
+    println!("[HEAP] initialized");
+
     Ok(())
 }
 
-pub fn init(physical_memory_offset: Option<u64>, memory_regions: &'static mut bootloader::boot_info::MemoryRegions) {
-    let mut mapper =
-        unsafe { super::memory::init(physical_memory_offset.unwrap_or(0)) };
+pub fn init(
+    physical_memory_offset: Option<u64>,
+    memory_regions: &'static mut bootloader_api::info::MemoryRegions,
+) {
+    println!("[ALLOCATOR] initializing");
+
+    let mut mapper = unsafe { super::memory::init(physical_memory_offset.unwrap_or(0)) };
     let mut frame_allocator =
         unsafe { super::memory::BootInfoFrameAllocator::init(memory_regions) };
     init_heap(&mut mapper, &mut frame_allocator).unwrap();
+
+    println!("[ALLOCATOR] initialized");
 }
 
 pub struct Locked<T> {

@@ -1,49 +1,20 @@
-#![no_std]
-#![no_main]
-#![feature(abi_x86_interrupt)]
-#![feature(alloc_error_handler)]
-#![feature(prelude_import)]
-#![feature(naked_functions)]
-#![feature(const_mut_refs)]
+fn main() {
+    // read env variables that were set in build script
+    let uefi_path = env!("UEFI_PATH");
+    let bios_path = env!("BIOS_PATH");
 
-#[macro_use]
-extern crate lazy_static;
-extern crate alloc;
+    // choose whether to start the UEFI or BIOS image
+    let uefi = true;
 
-mod prelude {
-    pub use alloc::{
-        borrow::ToOwned,
-        boxed::Box,
-        string::{String, ToString},
-        vec::Vec,
-    };
-    pub use core::arch::asm;
-    pub use core::prelude::v1::*;
-}
-
-#[prelude_import]
-#[allow(unused_imports)]
-use prelude::*;
-
-#[macro_use]
-mod debug;
-mod arch;
-mod task;
-mod framebuffer;
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("panic: {}", info);
-    arch::halt_loop();
-}
-
-#[alloc_error_handler]
-fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
-    panic!("allocation error: {:?}", layout);
-}
-
-pub(crate) fn main() -> ! {
-    println!("Welcome to SNEK OS");
-
-    task::start();
+    let mut cmd = std::process::Command::new("qemu-system-x86_64");
+    if uefi {
+        cmd.arg("-bios").arg(ovmf_prebuilt::ovmf_pure_efi());
+        cmd.arg("-drive")
+            .arg(format!("format=raw,file={uefi_path}"));
+    } else {
+        cmd.arg("-drive")
+            .arg(format!("format=raw,file={bios_path}"));
+    }
+    let mut child = cmd.spawn().unwrap();
+    child.wait().unwrap();
 }
