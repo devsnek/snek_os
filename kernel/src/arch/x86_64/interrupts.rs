@@ -216,7 +216,8 @@ fn init_lapic(apic_info: &ApicInfo) {
         pics.disable();
     }
 
-    let apic_virtual_address = VirtAddr::new(apic_info.local_apic_address);
+    let apic_virtual_address =
+        super::memory::map_address(PhysAddr::new(apic_info.local_apic_address), 4096);
 
     let mut lapic = LocalApicBuilder::new()
         .timer_vector(LOCAL_APIC_TIMER)
@@ -241,7 +242,6 @@ fn init_ioapic(apic_info: &ApicInfo) {
     let io_apic_virtual_address =
         super::memory::map_address(PhysAddr::new(apic_info.io_apics[0].address as u64), 4096);
 
-    // let io_apic_virtual_address = VirtAddr::new(apic_info.io_apics[0].address as u64);
     let mut ioapic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
 
     unsafe {

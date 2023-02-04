@@ -17,13 +17,9 @@ static WAKER: AtomicWaker = AtomicWaker::new();
 // DO NOT BLOCK OR ALLOCATE HERE!!!
 pub(crate) fn add_scancode(scancode: u8) {
     if let Ok(queue) = SCANCODE_QUEUE.try_get() {
-        if queue.push(scancode).is_err() {
-            println!("WARNING: scancode queue full; dropping keyboard input");
-        } else {
+        if queue.push(scancode).is_ok() {
             WAKER.wake();
         }
-    } else {
-        println!("WARNING: scancode queue uninitialized");
     }
 }
 
