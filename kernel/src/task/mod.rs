@@ -38,9 +38,12 @@ impl TaskId {
 }
 
 pub fn start() -> ! {
+    println!("[TASK] initializing");
+
     let mut executor = executor::Executor::new();
 
     executor.spawn(Task::new(keyboard::dispatch_keypresses()));
 
+    println!("[TASK] running");
     executor.run();
 }

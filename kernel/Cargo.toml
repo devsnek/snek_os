@@ -18,6 +18,9 @@ noto-sans-mono-bitmap = "0.2"
 x86_64 = "0.14"
 bootloader_api = "0.11"
 pic8259 = "0.10"
+acpi = "4.1"
+os_units = "0.4"
+x2apic = "0.4"
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

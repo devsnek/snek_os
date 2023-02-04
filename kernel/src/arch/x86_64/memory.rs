@@ -1,10 +1,19 @@
 use bootloader_api::info::{MemoryRegion, MemoryRegionKind, MemoryRegions};
+use spin::Mutex;
 use x86_64::{
     structures::paging::{
-        mapper::MapperAllSizes, FrameAllocator, OffsetPageTable, PageTable, PhysFrame, Size4KiB,
+        page::PageRange, FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable,
+        PageTableFlags, PhysFrame, Size4KiB, Translate,
     },
     PhysAddr, VirtAddr,
 };
+
+use os_units::{Bytes, NumOfPages};
+
+lazy_static! {
+    pub static ref MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
+    pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+}
 
 /// Initialize a new MappedPageTable.
 ///
@@ -12,15 +21,19 @@ use x86_64::{
 /// complete physical memory is mapped to virtual memory at the passed
 /// `physical_memory_offset`. Also, this function must be only called once
 /// to avoid aliasing `&mut` references (which is undefined behavior).
-pub unsafe fn init(physical_memory_offset: u64) -> impl MapperAllSizes {
+pub unsafe fn init(physical_memory_offset: u64, memory_regions: &'static mut MemoryRegions) {
     println!("[MEMORY] initializing");
 
     let level_4_table = active_level_4_table(physical_memory_offset);
     let table = OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset));
 
-    println!("[MEMORY] initialized");
+    let _ = MAPPER.lock().insert(table);
 
-    table
+    let frame_allocator = unsafe { BootInfoFrameAllocator::init(memory_regions) };
+
+    let _ = FRAME_ALLOCATOR.lock().insert(frame_allocator);
+
+    println!("[MEMORY] initialized");
 }
 
 /// Returns a mutable reference to the active level 4 table.
@@ -74,4 +87,82 @@ unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
         self.next += 1;
         frame
     }
+}
+
+fn search_free_addr_from(num_pages: NumOfPages<Size4KiB>, region: PageRange) -> Option<VirtAddr> {
+    let mut cnt = 0;
+    let mut start = None;
+    for page in region {
+        let addr = page.start_address();
+        if available(addr) {
+            if start.is_none() {
+                start = Some(addr);
+            }
+
+            cnt += 1;
+
+            if cnt >= num_pages.as_usize() {
+                return start;
+            }
+        } else {
+            cnt = 0;
+            start = None;
+        }
+    }
+
+    None
+}
+
+fn available(addr: VirtAddr) -> bool {
+    let mut binding1 = super::memory::MAPPER.lock();
+    let mapper = binding1.as_mut().unwrap();
+
+    mapper.translate_addr(addr).is_none() && !addr.is_null()
+}
+
+fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) -> VirtAddr {
+    let start_frame_addr = start.align_down(Size4KiB::SIZE);
+    let end_frame_addr = (start + object_size).align_down(Size4KiB::SIZE);
+
+    let num_pages =
+        Bytes::new((end_frame_addr - start_frame_addr) as usize + 1).as_num_of_pages::<Size4KiB>();
+
+    let virt = search_free_addr_from(num_pages, region)
+        .expect("OOM during creating a new accessor to a register.");
+
+    let mut binding1 = super::memory::MAPPER.lock();
+    let mapper = binding1.as_mut().unwrap();
+
+    let mut binding2 = super::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = binding2.as_mut().unwrap();
+
+    for i in 0..num_pages.as_usize() {
+        let page = Page::<Size4KiB>::containing_address(virt + Size4KiB::SIZE * i as u64);
+        let frame = PhysFrame::containing_address(start_frame_addr + Size4KiB::SIZE * i as u64);
+        let flag =
+            PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+
+        unsafe {
+            mapper
+                .map_to(page, frame, flag, frame_allocator)
+                .unwrap()
+                .flush();
+        }
+    }
+
+    let page_offset = start.as_u64() % Size4KiB::SIZE;
+
+    virt + page_offset
+}
+
+pub fn map_address(phys: PhysAddr, size: usize) -> VirtAddr {
+    map_pages_from(
+        phys,
+        size,
+        // FIXME: pass actual kernel memory map in boot_info and use that instead
+        PageRange {
+            start: Page::from_start_address(VirtAddr::new(0)).unwrap(),
+            end: Page::from_start_address(VirtAddr::new(0xffff_ffff_ffff_f000)).unwrap(),
+        },
+    )
 }

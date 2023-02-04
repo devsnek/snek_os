@@ -51,7 +51,7 @@ impl Stream for ScancodeStream {
             return Poll::Ready(Some(scancode));
         }
 
-        WAKER.register(&cx.waker());
+        WAKER.register(cx.waker());
         match queue.pop() {
             Some(scancode) => {
                 WAKER.take();
@@ -101,16 +101,10 @@ pub async fn dispatch_keypresses() {
                     meta_key = pressed;
                     None
                 }
-                _ => {
-                    if let Some(key) = keyboard.process_keyevent(event) {
-                        Some(match key {
-                            DecodedKey::Unicode(character) => (character.to_string(), pressed),
-                            DecodedKey::RawKey(key) => (alloc::format!("{:?}", key), pressed),
-                        })
-                    } else {
-                        None
-                    }
-                }
+                _ => keyboard.process_keyevent(event).map(|key| match key {
+                    DecodedKey::Unicode(character) => (character.to_string(), pressed),
+                    DecodedKey::RawKey(key) => (alloc::format!("{key:?}"), pressed),
+                }),
             }
         } else {
             None
@@ -126,7 +120,7 @@ pub async fn dispatch_keypresses() {
                 meta_key,
             };
 
-            println!("{:?}", event);
+            println!("{event:?}");
         }
     }
 }

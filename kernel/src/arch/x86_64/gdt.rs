@@ -1,6 +1,6 @@
 use x86_64::{
     instructions::{
-        segmentation::{CS, DS, ES, GS, SS},
+        segmentation::{CS, DS, ES, FS, GS, SS},
         tables::load_tss,
     },
     structures::{
@@ -97,12 +97,15 @@ pub fn init() {
     unsafe {
         use x86_64::instructions::segmentation::Segment;
 
-        SS::set_reg(GDT.1.kernel_data_selector);
-        DS::set_reg(GDT.1.kernel_data_selector);
-        ES::set_reg(GDT.1.kernel_data_selector);
+        CS::set_reg(GDT.1.kernel_code_selector);
+
+        DS::set_reg(SegmentSelector::NULL);
+        ES::set_reg(SegmentSelector::NULL);
+        FS::set_reg(GDT.1.kernel_data_selector);
         GS::set_reg(GDT.1.kernel_data_selector);
 
-        CS::set_reg(GDT.1.kernel_code_selector);
+        SS::set_reg(SegmentSelector::NULL);
+
         load_tss(GDT.1.tss_selector);
     }
 

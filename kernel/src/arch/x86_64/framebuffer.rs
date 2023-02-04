@@ -1,8 +1,6 @@
 use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use core::fmt::Write;
-use noto_sans_mono_bitmap::{
-    get_raster, FontWeight, RasterHeight, RasterizedChar,
-};
+use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
 
 static mut EMPTY_BUF: [u8; 0] = [];
@@ -53,12 +51,11 @@ struct Writer {
 unsafe impl Send for Writer {}
 
 const LINE_SPACING: usize = 2;
-const LETTER_SPACING: usize = 0;
 const BORDER_PADDING: usize = 1;
 const CHAR_RASTER_HEIGHT: RasterHeight = RasterHeight::Size16;
-const BACKUP_CHAR: char = '�';
 const FONT_WEIGHT: FontWeight = FontWeight::Regular;
 const LINE_HEIGHT: usize = CHAR_RASTER_HEIGHT.val() + LINE_SPACING;
+const BACKUP_CHAR: char = '�';
 
 impl Writer {
     fn newline(&mut self) {
@@ -154,7 +151,7 @@ impl Writer {
             '\r' => self.carriage_return(),
             c => {
                 let rendered_char = get_char_raster(c);
-                let width = rendered_char.width() + LETTER_SPACING;
+                let width = rendered_char.width();
 
                 let new_xpos = self.x_pos + width;
                 if new_xpos >= self.info.width {
@@ -169,9 +166,10 @@ impl Writer {
                 for (y, row) in rendered_char.raster().iter().enumerate() {
                     for (x, byte) in row.iter().enumerate() {
                         let r = *byte;
-                        let g = *byte / 2;
+                        let g = *byte;
                         let b = *byte;
-                        self.write_pixel(self.x_pos + x, self.y_pos + y, r, g, b, 255);
+                        let a = 255;
+                        self.write_pixel(self.x_pos + x, self.y_pos + y, r, g, b, a);
                     }
                 }
 
@@ -181,7 +179,7 @@ impl Writer {
     }
 
     fn write_rgba(&mut self, bytes: &[u8]) {
-        let mut image = bytes.into_iter();
+        let mut image = bytes.iter();
 
         let width = u32::from_be_bytes([(); 4].map(|_| *image.next().unwrap()));
         let height = u32::from_be_bytes([(); 4].map(|_| *image.next().unwrap()));

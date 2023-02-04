@@ -30,12 +30,13 @@ fn kernel_start(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
     }
 
     gdt::init();
-    interrupts::init();
 
     allocator::init(
         boot_info.physical_memory_offset.into(),
         &mut boot_info.memory_regions,
     );
+
+    interrupts::init(boot_info.rsdp_addr.into());
 
     crate::main();
 }
