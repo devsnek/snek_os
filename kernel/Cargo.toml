@@ -8,11 +8,13 @@ edition = "2021"
 spin = "0.9"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 linked_list_allocator = "0.10"
-pc-keyboard = "0.5"
+pc-keyboard = "0.6"
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = "0.2"
+embedded-graphics = "0.7"
+mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
@@ -21,6 +23,7 @@ pic8259 = "0.10"
 acpi = "4.1"
 os_units = "0.4"
 x2apic = "0.4"
+raw-cpuid = "10.6"
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

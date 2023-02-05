@@ -8,7 +8,7 @@ use futures_util::{
     stream::{Stream, StreamExt},
     task::AtomicWaker,
 };
-use pc_keyboard::{layouts, DecodedKey, HandleControl, KeyCode, KeyState, Keyboard, ScancodeSet1};
+use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1};
 
 static SCANCODE_QUEUE: OnceCell<ArrayQueue<u8>> = OnceCell::uninit();
 static WAKER: AtomicWaker = AtomicWaker::new();
@@ -58,65 +58,24 @@ impl Stream for ScancodeStream {
     }
 }
 
-#[derive(Debug)]
-struct KeyboardEvent {
-    code: String,
-    pressed: bool,
-    alt_key: bool,
-    ctrl_key: bool,
-    shift_key: bool,
-    meta_key: bool,
-}
-
 pub async fn dispatch_keypresses() {
     let mut scancodes = ScancodeStream::new();
-    let mut keyboard = Keyboard::new(layouts::Us104Key, ScancodeSet1, HandleControl::Ignore);
-
-    let mut alt_key = false;
-    let mut ctrl_key = false;
-    let mut shift_key = false;
-    let mut meta_key = false;
+    let mut keyboard = Keyboard::<layouts::Us104Key, ScancodeSet1>::new(HandleControl::Ignore);
 
     while let Some(scancode) = scancodes.next().await {
         let r = if let Ok(Some(event)) = keyboard.add_byte(scancode) {
-            let pressed = event.state == KeyState::Down;
-            match event.code {
-                KeyCode::AltLeft | KeyCode::AltRight => {
-                    alt_key = pressed;
-                    None
-                }
-                KeyCode::ControlLeft | KeyCode::ControlRight => {
-                    ctrl_key = pressed;
-                    None
-                }
-                KeyCode::ShiftLeft | KeyCode::ShiftRight => {
-                    shift_key = pressed;
-                    None
-                }
-                KeyCode::WindowsLeft | KeyCode::WindowsRight => {
-                    meta_key = pressed;
-                    None
-                }
-                _ => keyboard.process_keyevent(event).map(|key| match key {
-                    DecodedKey::Unicode(character) => (character.to_string(), pressed),
-                    DecodedKey::RawKey(key) => (alloc::format!("{key:?}"), pressed),
-                }),
-            }
+            keyboard.process_keyevent(event)
         } else {
             None
         };
 
-        if let Some((code, state)) = r {
-            let event = KeyboardEvent {
-                code,
-                pressed: state,
-                alt_key,
-                ctrl_key,
-                shift_key,
-                meta_key,
-            };
-
-            println!("{event:?}");
+        if let Some(key) = r {
+            match key {
+                DecodedKey::Unicode(c) => {
+                    print!("{c}");
+                }
+                DecodedKey::RawKey(_key) => {}
+            }
         }
     }
 }

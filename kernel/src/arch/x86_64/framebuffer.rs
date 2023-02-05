@@ -2,11 +2,15 @@ use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use core::fmt::Write;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
+use embedded_graphics::{
+    prelude::{OriginDimensions, Size, DrawTarget, RgbColor, Pixel},
+    pixelcolor::Rgb888,
+};
 
 static mut EMPTY_BUF: [u8; 0] = [];
 
 lazy_static! {
-    static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
+    pub static ref DISPLAY: Mutex<Display> = Mutex::new(Display {
         buffer: unsafe { &mut EMPTY_BUF },
         info: FrameBufferInfo {
             byte_len: 0,
@@ -23,12 +27,12 @@ lazy_static! {
 
 pub(crate) fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
     {
-        let mut writer = WRITER.lock();
-        writer.info = info;
-        writer.buffer = buffer;
-        writer.clear();
+        let mut display = DISPLAY.lock();
+        display.info = info;
+        display.buffer = buffer;
+        display.clear();
 
-        writer.write_rgba(include_bytes!("../../../logo_text.rgba"));
+        display.write_rgba(include_bytes!("../../../logo_text.rgba"));
     }
 
     println!("[FRAMEBUFFER] initialized");
@@ -37,18 +41,9 @@ pub(crate) fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
 #[doc(hidden)]
 pub fn _print(args: core::fmt::Arguments) {
     crate::arch::without_interrupts(|| {
-        WRITER.lock().write_fmt(args).unwrap();
+        DISPLAY.lock().write_fmt(args).unwrap();
     });
 }
-
-struct Writer {
-    buffer: &'static mut [u8],
-    info: FrameBufferInfo,
-    x_pos: usize,
-    y_pos: usize,
-}
-
-unsafe impl Send for Writer {}
 
 const LINE_SPACING: usize = 2;
 const BORDER_PADDING: usize = 1;
@@ -57,10 +52,31 @@ const FONT_WEIGHT: FontWeight = FontWeight::Regular;
 const LINE_HEIGHT: usize = CHAR_RASTER_HEIGHT.val() + LINE_SPACING;
 const BACKUP_CHAR: char = '�';
 
-impl Writer {
+fn get_char_raster(c: char) -> RasterizedChar {
+    fn get(c: char) -> Option<RasterizedChar> {
+        get_raster(c, FONT_WEIGHT, CHAR_RASTER_HEIGHT)
+    }
+    get(c).unwrap_or_else(|| get(BACKUP_CHAR).expect("Should get raster of backup char."))
+}
+
+pub struct Display {
+    buffer: &'static mut [u8],
+    info: FrameBufferInfo,
+    x_pos: usize,
+    y_pos: usize,
+}
+
+unsafe impl Send for Display {}
+
+impl Display {
     fn newline(&mut self) {
         self.y_pos += LINE_HEIGHT;
         self.carriage_return();
+
+        if self.y_pos + LINE_HEIGHT >= self.info.height {
+            self.scroll();
+            self.y_pos -= LINE_HEIGHT;
+        }
     }
 
     fn carriage_return(&mut self) {
@@ -89,6 +105,8 @@ impl Writer {
                 bytes,
             );
         }
+
+        self.buffer[(bytes + 1)..].fill(0);
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, mut r: u8, mut g: u8, mut b: u8, a: u8) {
@@ -158,11 +176,6 @@ impl Writer {
                     self.newline();
                 }
 
-                if self.y_pos + LINE_HEIGHT >= self.info.height {
-                    self.scroll();
-                    self.y_pos -= LINE_HEIGHT;
-                }
-
                 for (y, row) in rendered_char.raster().iter().enumerate() {
                     for (x, byte) in row.iter().enumerate() {
                         let r = *byte;
@@ -200,7 +213,7 @@ impl Writer {
     }
 }
 
-impl Write for Writer {
+impl Write for Display {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for c in s.chars() {
             self.write_char(c);
@@ -209,9 +222,24 @@ impl Write for Writer {
     }
 }
 
-fn get_char_raster(c: char) -> RasterizedChar {
-    fn get(c: char) -> Option<RasterizedChar> {
-        get_raster(c, FONT_WEIGHT, CHAR_RASTER_HEIGHT)
+impl OriginDimensions for Display {
+    fn size(&self) -> Size {
+        Size::new(self.info.width as u32, self.info.height as u32)
     }
-    get(c).unwrap_or_else(|| get(BACKUP_CHAR).expect("Should get raster of backup char."))
+}
+
+impl DrawTarget for Display {
+    type Color = Rgb888;
+    type Error = ();
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for pixel in pixels {
+            self.write_pixel(pixel.0.x as _, pixel.0.y as _, pixel.1.r(), pixel.1.g(), pixel.1.b(), 255);
+        }
+
+        Ok(())
+    }
 }

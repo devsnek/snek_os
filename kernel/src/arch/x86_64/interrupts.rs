@@ -4,10 +4,11 @@ use acpi::{
     AcpiHandler, AcpiTables, PhysicalMapping,
 };
 use pic8259::ChainedPics;
+use raw_cpuid::CpuId;
 use spin::Mutex;
 use x2apic::{
     ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry},
-    lapic::{LocalApic, LocalApicBuilder},
+    lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
     addr::{PhysAddr, VirtAddr},
@@ -54,11 +55,11 @@ lazy_static! {
         idt.alignment_check.set_handler_fn(alignment_check_handler);
 
         idt[LOCAL_APIC_ERROR].set_handler_fn(error_interrupt_handler);
-        idt[LOCAL_APIC_TIMER].set_handler_fn(timer_interrupt_handler);
+        idt[LOCAL_APIC_TIMER].set_handler_fn(apic_timer_interrupt_handler);
         idt[LOCAL_APIC_SPURIOUS].set_handler_fn(spurious_interrupt_handler);
 
         idt[IOAPIC_PS2_KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
-        idt[IOAPIC_PIT_TIMER].set_handler_fn(timer_interrupt_handler);
+        idt[IOAPIC_PIT_TIMER].set_handler_fn(pit_timer_interrupt_handler);
 
         idt
     };
@@ -135,15 +136,21 @@ extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFra
     }
 }
 
-extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // println!("TIMER");
+extern "x86-interrupt" fn apic_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::task::timer::on_tick();
+    unsafe {
+        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+    }
+}
+
+extern "x86-interrupt" fn pit_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    super::pit::on_tick();
     unsafe {
         LAPIC.lock().as_mut().unwrap().end_of_interrupt();
     }
 }
 
 extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    println!("SPURIOUS");
     unsafe {
         LAPIC.lock().as_mut().unwrap().end_of_interrupt();
     }
@@ -210,8 +217,7 @@ fn init_lapic(apic_info: &ApicInfo) {
     println!("[LAPIC] initializing");
 
     unsafe {
-        // We don't actually use the PIC, we just need to disable it so it doesn't interfere with
-        // the APIC/IOAPICs
+        // Disable PIC so it doesn't interfere with LAPIC/IOPICs
         let mut pics = ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET);
         pics.disable();
     }
@@ -267,6 +273,72 @@ fn init_ioapic(apic_info: &ApicInfo) {
     println!("[IOAPIC] initialized");
 }
 
+fn timer_frequency_hz() -> u32 {
+    let cpuid = CpuId::new();
+
+    if let Some(undivided_freq_khz) = cpuid
+        .get_hypervisor_info()
+        .and_then(|hypervisor| hypervisor.apic_frequency())
+    {
+        let frequency_hz = undivided_freq_khz / 1000 / 16;
+        return frequency_hz;
+    }
+
+    if let Some(undivided_freq_hz) = cpuid.get_tsc_info().map(|tsc| tsc.nominal_frequency()) {
+        let frequency_hz = undivided_freq_hz / 16;
+        return frequency_hz;
+    }
+
+    {
+        let mut lapic = LAPIC.lock();
+        let lapic = lapic.as_mut().unwrap();
+
+        unsafe {
+            lapic.set_timer_divide(TimerDivide::Div16);
+            lapic.set_timer_initial(-1i32 as u32);
+            lapic.set_timer_mode(TimerMode::OneShot);
+            lapic.enable_timer();
+        }
+    }
+
+    super::pit::PIT
+        .lock()
+        .sleep(core::time::Duration::from_millis(10));
+
+    let mut lapic = LAPIC.lock();
+    let lapic = lapic.as_mut().unwrap();
+    unsafe {
+        lapic.disable_timer();
+    }
+
+    let elapsed_ticks = unsafe { lapic.timer_current() };
+    let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
+    ticks_per_10ms * 100
+}
+
+fn init_timing() {
+    println!("[TIMING] initializing");
+
+    let interval = core::time::Duration::from_millis(10);
+    let timer_frequency_hz = timer_frequency_hz();
+    let ticks_per_ms = timer_frequency_hz / 1000;
+
+    let interval_ms = interval.as_millis() as u32;
+    let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).unwrap();
+
+    let mut lapic = LAPIC.lock();
+    let lapic = lapic.as_mut().unwrap();
+
+    unsafe {
+        lapic.set_timer_divide(TimerDivide::Div16);
+        lapic.set_timer_initial(ticks_per_interval);
+        lapic.set_timer_mode(TimerMode::Periodic);
+        lapic.enable_timer();
+    }
+
+    println!("[TIMING] initialized");
+}
+
 pub fn init(rsdp_address: Option<u64>) {
     println!("[INTERRUPTS] initializing");
 
@@ -282,6 +354,8 @@ pub fn init(rsdp_address: Option<u64>) {
     init_lapic(&apic_info);
 
     init_ioapic(&apic_info);
+
+    init_timing();
 
     x86_64::instructions::interrupts::enable();
 

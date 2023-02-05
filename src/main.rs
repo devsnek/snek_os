@@ -4,6 +4,7 @@ fn main() {
 
     let use_bios = std::env::args().any(|a| &a == "--bios");
     let use_kvm = !std::env::args().any(|a| &a == "--no-kvm");
+    let gdb = std::env::args().any(|a| &a == "--gdb");
 
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     if use_bios {
@@ -17,6 +18,10 @@ fn main() {
 
     if use_kvm {
         cmd.arg("-enable-kvm");
+    }
+
+    if gdb {
+        cmd.arg("-s");
     }
 
     let mut child = cmd.spawn().unwrap();

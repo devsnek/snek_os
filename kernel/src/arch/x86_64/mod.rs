@@ -3,6 +3,7 @@ mod framebuffer;
 mod gdt;
 mod interrupts;
 mod memory;
+mod pit;
 
 const CONFIG: bootloader_api::BootloaderConfig = {
     use bootloader_api::config::*;
@@ -17,9 +18,11 @@ const CONFIG: bootloader_api::BootloaderConfig = {
     mappings.dynamic_range_start = Some(0);
     mappings.dynamic_range_end = Some(0xffff_ffff_ffff);
 
+    let frame_buffer = FrameBuffer::new_default();
+
     let mut config = BootloaderConfig::new_default();
     config.mappings = mappings;
-    config.frame_buffer = FrameBuffer::new_default();
+    config.frame_buffer = frame_buffer;
     config.kernel_stack_size = 80 * 1024 * 128;
     config
 };
@@ -44,6 +47,7 @@ fn kernel_start(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
 bootloader_api::entry_point!(kernel_start, config = &CONFIG);
 
 pub(crate) use framebuffer::_print;
+pub(crate) use framebuffer::DISPLAY;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {
