@@ -36,7 +36,7 @@ unsafe fn active_level_4_table(physical_memory_offset: u64) -> &'static mut Page
     let (level_4_table_frame, _) = Cr3::read();
 
     let phys = level_4_table_frame.start_address();
-    let virt = VirtAddr::new(physical_memory_offset) + phys.as_u64();
+    let virt = VirtAddr::new(physical_memory_offset + phys.as_u64());
     let page_table_ptr: *mut PageTable = virt.as_mut_ptr();
 
     &mut *page_table_ptr // unsafe
@@ -102,8 +102,8 @@ fn search_free_addr_from(num_pages: NumOfPages<Size4KiB>, region: PageRange) -> 
 }
 
 fn available(addr: VirtAddr) -> bool {
-    let mut binding1 = super::memory::MAPPER.lock();
-    let mapper = binding1.as_mut().unwrap();
+    let mut binding = super::memory::MAPPER.lock();
+    let mapper = binding.as_mut().unwrap();
 
     mapper.translate_addr(addr).is_none() && !addr.is_null()
 }

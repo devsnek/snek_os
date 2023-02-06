@@ -2,10 +2,6 @@ use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use core::fmt::Write;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
-use embedded_graphics::{
-    prelude::{OriginDimensions, Size, DrawTarget, RgbColor, Pixel},
-    pixelcolor::Rgb888,
-};
 
 static mut EMPTY_BUF: [u8; 0] = [];
 
@@ -25,7 +21,7 @@ lazy_static! {
     });
 }
 
-pub(crate) fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
+pub fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
     {
         let mut display = DISPLAY.lock();
         display.info = info;
@@ -218,28 +214,6 @@ impl Write for Display {
         for c in s.chars() {
             self.write_char(c);
         }
-        Ok(())
-    }
-}
-
-impl OriginDimensions for Display {
-    fn size(&self) -> Size {
-        Size::new(self.info.width as u32, self.info.height as u32)
-    }
-}
-
-impl DrawTarget for Display {
-    type Color = Rgb888;
-    type Error = ();
-
-    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
-    where
-        I: IntoIterator<Item = Pixel<Self::Color>>,
-    {
-        for pixel in pixels {
-            self.write_pixel(pixel.0.x as _, pixel.0.y as _, pixel.1.r(), pixel.1.g(), pixel.1.b(), 255);
-        }
-
         Ok(())
     }
 }

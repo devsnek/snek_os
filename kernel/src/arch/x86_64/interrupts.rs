@@ -1,8 +1,5 @@
 use super::gdt;
-use acpi::{
-    platform::interrupt::{Apic as ApicInfo, InterruptModel},
-    AcpiHandler, AcpiTables, PhysicalMapping,
-};
+use acpi::{platform::interrupt::Apic as ApicInfo, InterruptModel, PlatformInfo};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
 use spin::Mutex;
@@ -11,10 +8,10 @@ use x2apic::{
     lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
-    addr::{PhysAddr, VirtAddr},
     instructions::port::Port,
     registers::control::Cr2,
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
+    PhysAddr,
 };
 
 const PS2_KEYBOARD_IRQ: u8 = 1;
@@ -32,7 +29,7 @@ const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
 const LOCAL_APIC_TIMER: usize = NUM_VECTORS - 2;
 const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
 
-static LAPIC: Mutex<Option<LocalApic>> = Mutex::new(None);
+pub static LAPIC: Mutex<Option<LocalApic>> = Mutex::new(None);
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -132,27 +129,27 @@ extern "x86-interrupt" fn double_fault_handler(
 extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFrame) {
     println!("ERROR: {:#?}", stack_frame);
     unsafe {
-        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+        end_of_interrupt();
     }
 }
 
 extern "x86-interrupt" fn apic_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     crate::task::timer::on_tick();
     unsafe {
-        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+        end_of_interrupt();
     }
 }
 
 extern "x86-interrupt" fn pit_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     super::pit::on_tick();
     unsafe {
-        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+        end_of_interrupt();
     }
 }
 
 extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     unsafe {
-        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+        end_of_interrupt();
     }
 }
 
@@ -161,56 +158,14 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let scancode: u8 = unsafe { port.read() };
     crate::task::keyboard::add_scancode(scancode);
     unsafe {
-        LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+        end_of_interrupt();
     }
 }
 
-#[derive(Clone)]
-struct AcpiHandlerImpl;
-
-impl AcpiHandler for AcpiHandlerImpl {
-    unsafe fn map_physical_region<T>(
-        &self,
-        physical_address: usize,
-        size: usize,
-    ) -> PhysicalMapping<Self, T> {
-        let virtual_address =
-            super::memory::map_address(PhysAddr::new(physical_address as u64), size);
-
-        PhysicalMapping::new(
-            physical_address,
-            core::ptr::NonNull::new(virtual_address.as_mut_ptr()).unwrap(),
-            size,
-            size,
-            self.clone(),
-        )
-    }
-
-    fn unmap_physical_region<T>(region: &PhysicalMapping<Self, T>) {
-        use os_units::Bytes;
-        use x86_64::structures::paging::Mapper;
-        use x86_64::structures::paging::{Page, PageSize, Size4KiB};
-
-        let start = VirtAddr::new(region.virtual_start().as_ptr() as u64);
-        let object_size = Bytes::new(region.region_length());
-
-        let start_frame_addr = start.align_down(Size4KiB::SIZE);
-        let end_frame_addr = (start + object_size.as_usize()).align_down(Size4KiB::SIZE);
-
-        let num_pages =
-            Bytes::new((end_frame_addr - start_frame_addr) as usize).as_num_of_pages::<Size4KiB>();
-
-        let mut binding1 = super::memory::MAPPER.lock();
-        let mapper = binding1.as_mut().unwrap();
-
-        for i in 0..num_pages.as_usize() {
-            let page =
-                Page::<Size4KiB>::containing_address(start_frame_addr + Size4KiB::SIZE * i as u64);
-
-            let (_frame, flusher) = mapper.unmap(page).unwrap();
-            flusher.flush();
-        }
-    }
+unsafe fn end_of_interrupt() {
+    const APIC_BASE_ADDR: usize = 0xfee00000;
+    let addr = (APIC_BASE_ADDR + 0xB0) as *mut u32;
+    addr.write_volatile(0x0);
 }
 
 fn init_lapic(apic_info: &ApicInfo) {
@@ -303,7 +258,7 @@ fn timer_frequency_hz() -> u32 {
 
     super::pit::PIT
         .lock()
-        .sleep(core::time::Duration::from_millis(10));
+        .sleep(crate::task::timer::TIMER_INTERVAL);
 
     let mut lapic = LAPIC.lock();
     let lapic = lapic.as_mut().unwrap();
@@ -339,21 +294,16 @@ fn init_timing() {
     println!("[TIMING] initialized");
 }
 
-pub fn init(rsdp_address: Option<u64>) {
+pub fn init(acpi_platform_info: &PlatformInfo) {
     println!("[INTERRUPTS] initializing");
 
     IDT.load();
 
-    let rsdp_address = rsdp_address.expect("RSDP address missing");
-    let acpi_tables =
-        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address as usize) }.unwrap();
+    let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else { panic!("unsupported interrupt model") };
 
-    let acpi_platform_info = acpi_tables.platform_info().unwrap();
-    let InterruptModel::Apic(apic_info) = acpi_platform_info.interrupt_model else { panic!("unsupported interrupt model") };
+    init_lapic(apic_info);
 
-    init_lapic(&apic_info);
-
-    init_ioapic(&apic_info);
+    init_ioapic(apic_info);
 
     init_timing();
 

@@ -1,98 +1,238 @@
-use super::{Task, TaskId};
-use alloc::{collections::BTreeMap, sync::Arc, task::Wake};
-use core::task::{Context, Poll, Waker};
-use crossbeam_queue::ArrayQueue;
+use conquer_once::spin::OnceCell;
+use core::{
+    cell::Cell,
+    future::Future,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
+use maitake::{
+    scheduler::{Injector, StaticScheduler, Stealer, TaskStub},
+    task::JoinHandle,
+};
+use rand::{Rng, SeedableRng};
+use spin::Mutex;
+
+struct Hack<T> {
+    inner: Mutex<T>,
+}
+
+impl<T> Hack<T> {
+    const fn new(v: T) -> Self {
+        Self {
+            inner: Mutex::new(v),
+        }
+    }
+
+    fn with<F, U>(&self, f: F) -> U
+    where
+        F: FnOnce(&T) -> U,
+    {
+        let v = self.inner.lock();
+        f(&v)
+    }
+}
+
+static SCHEDULER: Hack<Cell<Option<&'static StaticScheduler>>> = Hack::new(Cell::new(None));
+
+static RUNTIME: Runtime = {
+    const UNINIT_SCHEDULER: OnceCell<StaticScheduler> = OnceCell::uninit();
+
+    Runtime {
+        cores: [UNINIT_SCHEDULER; MAX_CORES],
+        initialized: AtomicUsize::new(0),
+        injector: {
+            static STUB_TASK: TaskStub = TaskStub::new();
+            unsafe { Injector::new_with_static_stub(&STUB_TASK) }
+        },
+    }
+};
+
+const MAX_CORES: usize = 32;
+
+struct Runtime {
+    cores: [OnceCell<StaticScheduler>; MAX_CORES],
+
+    injector: Injector<&'static StaticScheduler>,
+    initialized: AtomicUsize,
+}
+
+impl Runtime {
+    fn active_cores(&self) -> usize {
+        self.initialized.load(Ordering::Acquire)
+    }
+
+    fn new_scheduler(&self) -> (usize, &StaticScheduler) {
+        let next = self.initialized.fetch_add(1, Ordering::AcqRel);
+        assert!(next < MAX_CORES);
+        let scheduler = self.cores[next]
+            .try_get_or_init(|| StaticScheduler::new())
+            .unwrap();
+        (next, scheduler)
+    }
+
+    fn try_steal_from(
+        &'static self,
+        idx: usize,
+    ) -> Option<Stealer<'static, &'static StaticScheduler>> {
+        self.cores[idx].try_get().unwrap().try_steal().ok()
+    }
+}
 
 pub struct Executor {
-    tasks: BTreeMap<TaskId, Task>,
-    task_queue: Arc<ArrayQueue<TaskId>>,
-    waker_cache: BTreeMap<TaskId, Waker>,
+    id: usize,
+    scheduler: &'static StaticScheduler,
+    running: AtomicBool,
+    rng: rand_xoshiro::Xoroshiro128PlusPlus,
 }
 
 impl Executor {
     pub fn new() -> Executor {
+        let (id, scheduler) = RUNTIME.new_scheduler();
         Executor {
-            tasks: BTreeMap::new(),
-            task_queue: Arc::new(ArrayQueue::new(100)),
-            waker_cache: BTreeMap::new(),
+            id,
+            scheduler,
+            running: AtomicBool::new(false),
+            rng: rand_xoshiro::Xoroshiro128PlusPlus::from_seed(
+                <rand_xoshiro::Xoroshiro128PlusPlus as SeedableRng>::Seed::default(),
+            ),
         }
     }
 
-    pub fn spawn(&mut self, task: Task) {
-        let task_id = task.id;
-        if self.tasks.insert(task.id, task).is_some() {
-            panic!("task with same ID already in tasks");
-        }
-        self.task_queue.push(task_id).expect("queue full");
+    #[inline]
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Acquire)
     }
 
-    fn run_ready_tasks(&mut self) {
-        let Self {
-            tasks,
-            task_queue,
-            waker_cache,
-        } = self;
+    fn tick(&mut self) -> bool {
+        let tick = self.scheduler.tick();
 
-        while let Some(task_id) = task_queue.pop() {
-            let task = match tasks.get_mut(&task_id) {
-                Some(task) => task,
-                None => continue,
-            };
-            let waker = waker_cache
-                .entry(task_id)
-                .or_insert_with(|| TaskWaker::create(task_id, task_queue.clone()));
-            let mut context = Context::from_waker(waker);
-            match task.poll(&mut context) {
-                Poll::Ready(()) => {
-                    tasks.remove(&task_id);
-                    waker_cache.remove(&task_id);
-                }
-                Poll::Pending => {}
+        super::timer::TIMER.advance_ticks(0);
+
+        if tick.has_remaining {
+            return true;
+        }
+
+        let stolen = self.try_steal();
+        if stolen > 0 {
+            return true;
+        }
+
+        false
+    }
+
+    pub fn run(&mut self) {
+        struct CoreGuard;
+        impl Drop for CoreGuard {
+            fn drop(&mut self) {
+                SCHEDULER.with(|scheduler| scheduler.set(None));
             }
         }
-    }
 
-    fn sleep_if_idle(&self) {
-        crate::arch::disable_interrupts();
-        if self.task_queue.is_empty() {
-            crate::arch::enable_interrupts_and_halt();
-        } else {
-            crate::arch::enable_interrupts();
+        if self
+            .running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
         }
-    }
 
-    pub fn run(&mut self) -> ! {
+        SCHEDULER.with(|scheduler| scheduler.set(Some(self.scheduler)));
+        let _unset = CoreGuard;
+
         loop {
-            self.run_ready_tasks();
-            self.sleep_if_idle();
+            if self.tick() {
+                continue;
+            }
+
+            if !self.is_running() {
+                return;
+            }
+
+            crate::arch::enable_interrupts_and_halt();
+        }
+    }
+
+    fn try_steal(&mut self) -> usize {
+        const MAX_STEAL_ATTEMPTS: usize = 16;
+        const MAX_STOLEN_PER_TICK: usize = 256;
+
+        // first, try to steal from the injector queue.
+        if let Ok(injector) = RUNTIME.injector.try_steal() {
+            return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
+        }
+
+        let mut attempts = 0;
+        while attempts < MAX_STEAL_ATTEMPTS {
+            let active_cores = RUNTIME.active_cores();
+
+            if active_cores <= 1 {
+                break;
+            }
+
+            let victim_idx = self.rng.gen_range(0..active_cores);
+
+            if victim_idx == self.id {
+                continue;
+            }
+
+            if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
+                let num_steal =
+                    core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
+                return victim.spawn_n(&self.scheduler, num_steal);
+            } else {
+                attempts += 1;
+            }
+        }
+
+        if let Ok(injector) = RUNTIME.injector.try_steal() {
+            injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK)
+        } else {
+            0
         }
     }
 }
 
-struct TaskWaker {
-    task_id: TaskId,
-    task_queue: Arc<ArrayQueue<TaskId>>,
+pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    SCHEDULER.with(|scheduler| {
+        if let Some(scheduler) = scheduler.get() {
+            scheduler.spawn(future)
+        } else {
+            RUNTIME.injector.spawn(future)
+        }
+    })
 }
 
-impl TaskWaker {
-    fn create(task_id: TaskId, task_queue: Arc<ArrayQueue<TaskId>>) -> Waker {
-        Waker::from(Arc::new(TaskWaker {
-            task_id,
-            task_queue,
-        }))
+pub fn spawn_blocking<F>(future: F) -> F::Output
+where
+    F: Future + Send,
+    F::Output: Send,
+{
+    use alloc::sync::Arc;
+    use futures::task::{waker, ArcWake, Context, Poll};
+
+    futures::pin_mut!(future);
+
+    struct Waker;
+    impl ArcWake for Waker {
+        fn wake_by_ref(arc_self: &Arc<Self>) {}
     }
 
-    fn wake_task(&self) {
-        self.task_queue.push(self.task_id).expect("task_queue full");
-    }
-}
+    let waker = waker(Arc::new(Waker));
+    let mut context = Context::from_waker(&waker);
 
-impl Wake for TaskWaker {
-    fn wake(self: Arc<Self>) {
-        self.wake_task();
-    }
+    loop {
+        super::timer::TIMER.advance_ticks(0);
 
-    fn wake_by_ref(self: &Arc<Self>) {
-        self.wake_task();
+        match Future::poll(future.as_mut(), &mut context) {
+            Poll::Ready(v) => {
+                return v;
+            }
+            Poll::Pending => {}
+        }
+
+        crate::arch::enable_interrupts_and_halt();
     }
 }

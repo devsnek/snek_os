@@ -1,11 +1,16 @@
+mod acpi;
 mod allocator;
 mod framebuffer;
 mod gdt;
 mod interrupts;
 mod memory;
 mod pit;
+mod smp;
 
-const CONFIG: bootloader_api::BootloaderConfig = {
+use bootloader_api::{BootInfo, BootloaderConfig};
+use x86_64::PhysAddr;
+
+const CONFIG: BootloaderConfig = {
     use bootloader_api::config::*;
 
     let mut mappings = Mappings::new_default();
@@ -14,9 +19,9 @@ const CONFIG: bootloader_api::BootloaderConfig = {
     mappings.framebuffer = Mapping::Dynamic;
     mappings.physical_memory = Some(Mapping::Dynamic);
     mappings.page_table_recursive = None;
-    mappings.aslr = false;
-    mappings.dynamic_range_start = Some(0);
-    mappings.dynamic_range_end = Some(0xffff_ffff_ffff);
+    mappings.aslr = true;
+    mappings.dynamic_range_start = Some(0xFFFF_8000_0000_0000);
+    mappings.dynamic_range_end = Some(0xFFFF_FFFF_FFFF_FFFF);
 
     let frame_buffer = FrameBuffer::new_default();
 
@@ -27,7 +32,7 @@ const CONFIG: bootloader_api::BootloaderConfig = {
     config
 };
 
-fn kernel_start(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
+fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
     if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
         framebuffer::init(framebuffer.info(), framebuffer.buffer_mut());
     }
@@ -39,15 +44,18 @@ fn kernel_start(boot_info: &'static mut bootloader_api::BootInfo) -> ! {
         &mut boot_info.memory_regions,
     );
 
-    interrupts::init(boot_info.rsdp_addr.into());
+    let acpi_platform_info = acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
+
+    interrupts::init(&acpi_platform_info);
+
+    smp::init(&acpi_platform_info);
 
     crate::main();
 }
 
 bootloader_api::entry_point!(kernel_start, config = &CONFIG);
 
-pub(crate) use framebuffer::_print;
-pub(crate) use framebuffer::DISPLAY;
+pub use framebuffer::_print;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

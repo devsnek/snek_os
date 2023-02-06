@@ -10,11 +10,14 @@ lazy_static = { version = "1.4", features = ["spin_no_std"] }
 linked_list_allocator = "0.10"
 pc-keyboard = "0.6"
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = "0.2"
-embedded-graphics = "0.7"
 mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
+maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "09c84f4e8171f60b1f0ab03627ba5040934dc3a7" }
+rand_xoshiro = "0.6"
+rand = { version = "0.8", default_features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"

@@ -24,6 +24,8 @@ fn main() {
         cmd.arg("-s");
     }
 
+    cmd.arg("-smp").arg("2");
+
     let mut child = cmd.spawn().unwrap();
     child.wait().unwrap();
 }

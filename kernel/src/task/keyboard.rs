@@ -15,7 +15,7 @@ static WAKER: AtomicWaker = AtomicWaker::new();
 
 // INTERRUPT HANDLER!!!
 // DO NOT BLOCK OR ALLOCATE HERE!!!
-pub(crate) fn add_scancode(scancode: u8) {
+pub fn add_scancode(scancode: u8) {
     if let Ok(queue) = SCANCODE_QUEUE.try_get() {
         if queue.push(scancode).is_ok() {
             WAKER.wake();

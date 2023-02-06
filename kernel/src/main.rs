@@ -5,6 +5,7 @@
 #![feature(prelude_import)]
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
+#![feature(never_type)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -41,30 +42,20 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
     panic!("allocation error: {:?}", layout);
 }
 
-fn test_embedded_graphics() {
-        use core::ops::DerefMut;
-        use embedded_graphics::{
-            pixelcolor::Rgb888,
-            prelude::*,
-            primitives::{PrimitiveStyle, Triangle},
-        };
-
-        let thin_stroke = PrimitiveStyle::with_stroke(Rgb888::new(255, 255, 255), 1);
-        let yoffset = 10;
-        Triangle::new(
-            Point::new(16, 16 + yoffset),
-            Point::new(16 + 16, 16 + yoffset),
-            Point::new(16 + 8, yoffset),
-        )
-        .into_styled(thin_stroke)
-        .draw(arch::DISPLAY.lock().deref_mut())
-        .unwrap();
-}
-
-pub(crate) fn main() -> ! {
+pub fn main() -> ! {
     println!("Welcome to SNEK OS");
 
-    test_embedded_graphics();
-
     task::start();
+
+    arch::halt_loop();
+}
+
+pub struct ProcessorInfo {
+    id: u32,
+}
+
+pub fn ap_main(info: ProcessorInfo) -> ! {
+    println!("[SMP] processor {} started", info.id);
+
+    arch::halt_loop();
 }
