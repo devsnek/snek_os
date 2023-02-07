@@ -16,8 +16,6 @@ lazy_static! {
 }
 
 pub unsafe fn init(physical_memory_offset: u64, memory_regions: &'static mut MemoryRegions) {
-    println!("[MEMORY] initializing");
-
     let level_4_table = active_level_4_table(physical_memory_offset);
     let table = OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset));
 
@@ -118,11 +116,11 @@ fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) -> Vir
     let virt = search_free_addr_from(num_pages, region)
         .expect("OOM during creating a new accessor to a register.");
 
-    let mut binding1 = super::memory::MAPPER.lock();
-    let mapper = binding1.as_mut().unwrap();
+    let mut mapper = super::memory::MAPPER.lock();
+    let mapper = mapper.as_mut().unwrap();
 
-    let mut binding2 = super::memory::FRAME_ALLOCATOR.lock();
-    let frame_allocator = binding2.as_mut().unwrap();
+    let mut frame_allocator = super::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = frame_allocator.as_mut().unwrap();
 
     for i in 0..num_pages.as_usize() {
         let page = Page::<Size4KiB>::containing_address(virt + Size4KiB::SIZE * i as u64);
@@ -147,10 +145,9 @@ pub fn map_address(phys: PhysAddr, size: usize) -> VirtAddr {
     map_pages_from(
         phys,
         size,
-        // FIXME: pass actual kernel memory map in boot_info and use that instead
         PageRange {
-            start: Page::from_start_address(VirtAddr::new(0)).unwrap(),
-            end: Page::from_start_address(VirtAddr::new(0xffff_ffff_ffff_f000)).unwrap(),
+            start: Page::from_start_address(VirtAddr::new(0xFFFF_8000_0000_0000)).unwrap(),
+            end: Page::containing_address(VirtAddr::new(0xFFFF_FFFF_FFFF_FFFF)),
         },
     )
 }

@@ -83,6 +83,7 @@ impl Display {
         self.x_pos = BORDER_PADDING;
         self.y_pos = BORDER_PADDING;
         self.buffer.fill(0);
+        let _ = unsafe { core::ptr::read_volatile(&self.buffer[0]) };
     }
 
     fn scroll(&mut self) {
@@ -103,6 +104,8 @@ impl Display {
         }
 
         self.buffer[(bytes + 1)..].fill(0);
+
+        let _ = unsafe { core::ptr::read_volatile(&self.buffer[bytes]) };
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, mut r: u8, mut g: u8, mut b: u8, a: u8) {

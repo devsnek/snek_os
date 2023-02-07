@@ -162,15 +162,12 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     }
 }
 
+#[inline(always)]
 unsafe fn end_of_interrupt() {
-    const APIC_BASE_ADDR: usize = 0xfee00000;
-    let addr = (APIC_BASE_ADDR + 0xB0) as *mut u32;
-    addr.write_volatile(0x0);
+    LAPIC.lock().as_mut().unwrap().end_of_interrupt();
 }
 
 fn init_lapic(apic_info: &ApicInfo) {
-    println!("[LAPIC] initializing");
-
     unsafe {
         // Disable PIC so it doesn't interfere with LAPIC/IOPICs
         let mut pics = ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET);
@@ -198,8 +195,6 @@ fn init_lapic(apic_info: &ApicInfo) {
 }
 
 fn init_ioapic(apic_info: &ApicInfo) {
-    println!("[IOAPIC] initializing");
-
     let io_apic_virtual_address =
         super::memory::map_address(PhysAddr::new(apic_info.io_apics[0].address as u64), 4096);
 
@@ -272,7 +267,7 @@ fn timer_frequency_hz() -> u32 {
 }
 
 fn init_timing() {
-    println!("[TIMING] initializing");
+    crate::task::timer::init();
 
     let interval = core::time::Duration::from_millis(10);
     let timer_frequency_hz = timer_frequency_hz();
@@ -295,8 +290,6 @@ fn init_timing() {
 }
 
 pub fn init(acpi_platform_info: &PlatformInfo) {
-    println!("[INTERRUPTS] initializing");
-
     IDT.load();
 
     let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else { panic!("unsupported interrupt model") };

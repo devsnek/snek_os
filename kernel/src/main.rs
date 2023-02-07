@@ -6,6 +6,7 @@
 #![feature(naked_functions)]
 #![feature(const_mut_refs)]
 #![feature(never_type)]
+#![feature(asm_const)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -18,7 +19,7 @@ mod prelude {
         string::{String, ToString},
         vec::Vec,
     };
-    pub use core::arch::asm;
+    pub use core::arch::{asm, global_asm};
     pub use core::prelude::v1::*;
 }
 

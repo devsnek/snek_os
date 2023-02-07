@@ -90,8 +90,6 @@ pub struct Selectors {
 }
 
 pub fn init() {
-    println!("[GDT] initializing");
-
     GDT.0.load();
 
     unsafe {

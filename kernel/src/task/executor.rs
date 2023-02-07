@@ -217,7 +217,7 @@ where
 
     struct Waker;
     impl ArcWake for Waker {
-        fn wake_by_ref(arc_self: &Arc<Self>) {}
+        fn wake_by_ref(_arc_self: &Arc<Self>) {}
     }
 
     let waker = waker(Arc::new(Waker));

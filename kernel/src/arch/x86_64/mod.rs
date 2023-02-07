@@ -65,16 +65,6 @@ pub fn halt_loop() -> ! {
 }
 
 #[inline(always)]
-pub fn enable_interrupts() {
-    x86_64::instructions::interrupts::enable();
-}
-
-#[inline(always)]
-pub fn disable_interrupts() {
-    x86_64::instructions::interrupts::disable();
-}
-
-#[inline(always)]
 pub fn enable_interrupts_and_halt() {
     x86_64::instructions::interrupts::enable_and_hlt();
 }
