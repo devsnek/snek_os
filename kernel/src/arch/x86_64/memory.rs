@@ -106,7 +106,7 @@ fn available(addr: VirtAddr) -> bool {
     mapper.translate_addr(addr).is_none() && !addr.is_null()
 }
 
-fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) -> VirtAddr {
+pub fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) -> VirtAddr {
     let start_frame_addr = start.align_down(Size4KiB::SIZE);
     let end_frame_addr = (start + object_size).align_down(Size4KiB::SIZE);
 
