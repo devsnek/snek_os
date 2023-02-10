@@ -187,6 +187,7 @@ fn init_lapic(apic_info: &ApicInfo) {
 
     unsafe {
         lapic.enable();
+        lapic.disable_timer();
     }
 
     let _ = LAPIC.lock().insert(lapic);
@@ -298,7 +299,7 @@ pub fn init(acpi_platform_info: &PlatformInfo) {
 
     init_ioapic(apic_info);
 
-    init_timing();
+    // init_timing();
 
     x86_64::instructions::interrupts::enable();
 

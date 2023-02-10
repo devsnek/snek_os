@@ -8,11 +8,47 @@ use core::{convert::TryInto, time::Duration};
 use futures::channel::oneshot;
 use maitake::time::sleep;
 use x86_64::{
-    structures::paging::{page::PageRange, Mapper, Page, Size4KiB},
+    structures::paging::{Mapper, Page, PageTableFlags, PhysFrame, Translate},
     PhysAddr, VirtAddr,
 };
 
 const AP_ENTRY_ADDRESS: usize = 0x4000;
+const GDT_ADDRESS: usize = 0x4800;
+
+fn quick_map(from: VirtAddr, to: PhysAddr) -> DropUnmap {
+    let page = Page::containing_address(from);
+    let frame = PhysFrame::containing_address(to);
+
+    let mut mapper = super::memory::MAPPER.lock();
+    let mapper = mapper.as_mut().unwrap();
+
+    let mut frame_allocator = super::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = frame_allocator.as_mut().unwrap();
+
+    let flag = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+
+    unsafe {
+        mapper
+            .map_to(page, frame, flag, frame_allocator)
+            .unwrap()
+            .flush();
+    }
+
+    DropUnmap { page }
+}
+
+struct DropUnmap {
+    page: Page,
+}
+
+impl Drop for DropUnmap {
+    fn drop(&mut self) {
+        let mut mapper = super::memory::MAPPER.lock();
+        let mapper = mapper.as_mut().unwrap();
+        let (_frame, flusher) = mapper.unmap(self.page).unwrap();
+        flusher.flush();
+    }
+}
 
 fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *mut u8) {
     let processor_id = processor.processor_uid;
@@ -26,7 +62,7 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
             .send_init_ipi(processor.local_apic_id);
     }
 
-    let wait_after_init = sleep(Duration::from_millis(10));
+    // let wait_after_init = sleep(Duration::from_millis(10));
 
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -70,7 +106,6 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
         let pml4_offset = pointers::pml4 as usize - pointers::ap_entry as usize;
         let long_mode_jump_offset = pointers::long_mode_jump as usize - pointers::ap_entry as usize;
         let long_mode_offset = pointers::long_mode as usize - pointers::ap_entry as usize;
-        let gdt_offset = pointers::gdt as usize - pointers::ap_entry as usize;
 
         // set page table
         let pml4_ptr = bootstrap_code_buf_ptr.add(pml4_offset);
@@ -88,15 +123,6 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 .try_into()
                 .unwrap(),
         );
-
-        // set gdt descriptor
-        let gdt_limit_ptr = bootstrap_code_buf_ptr.add(gdt_offset) as *mut u16;
-        let gdt_base_ptr = bootstrap_code_buf_ptr.add(gdt_offset + 2) as *mut u64;
-        assert_eq!(gdt_limit_ptr.read(), 15);
-        assert_eq!(gdt_base_ptr.read(), 0xFFFF_0000_FFFF_0000);
-        let desc = x86_64::instructions::tables::sgdt();
-        gdt_limit_ptr.write(desc.limit);
-        gdt_base_ptr.write(desc.base.as_u64());
 
         // set long mode jump location
         let long_mode_jump_ptr = bootstrap_code_buf_ptr.add(long_mode_jump_offset);
@@ -123,7 +149,27 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
         long_mode_ptr.write_unaligned(stack_top as u64);
     }
 
-    crate::task::spawn_blocking(wait_after_init);
+    // set gdt descriptor
+    let desc = x86_64::instructions::tables::sgdt();
+
+    let phys_addr = super::memory::MAPPER
+        .lock()
+        .as_ref()
+        .unwrap()
+        .translate_addr(desc.base)
+        .unwrap();
+    let _mapped_page = quick_map(VirtAddr::new(0x5000), phys_addr);
+    let virt_addr = VirtAddr::new(0x5000 + (phys_addr.as_u64() % 0x1000));
+
+    unsafe {
+        (GDT_ADDRESS as *mut u16).write(desc.limit);
+        ((GDT_ADDRESS + 2) as *mut u32).write(virt_addr.as_u64().try_into().unwrap());
+    }
+
+    // crate::task::spawn_blocking(wait_after_init);
+    for i in 0..100_000_000 {
+        // owo
+    }
 
     let mut attempts = 0;
     loop {
@@ -146,6 +192,11 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 .send_sipi((boot_fn >> 12) as u8, processor.local_apic_id);
         }
 
+        for i in 0..100_000_000_000u64 {
+            // owo
+        }
+
+        /*
         let ap_ready_timeout = sleep(Duration::from_secs(1));
         futures::pin_mut!(ap_ready_timeout);
         match crate::task::spawn_blocking(futures::future::select(
@@ -157,19 +208,25 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 break;
             }
         }
+        */
     }
 }
 
 pub fn init(acpi_platform_info: &PlatformInfo) {
     assert!((pointers::ap_end as usize) - (pointers::ap_entry as usize) < 0x1000);
 
-    let bootstrap_code_buf_ptr = super::memory::map_pages_from(
+    let bootstrap_code_buf_ptr = VirtAddr::new(AP_ENTRY_ADDRESS as u64);
+    let _mapped_page = quick_map(
+        bootstrap_code_buf_ptr,
         PhysAddr::new(AP_ENTRY_ADDRESS as u64),
-        0x1000,
-        PageRange {
-            start: Page::from_start_address(VirtAddr::new(AP_ENTRY_ADDRESS as u64)).unwrap(),
-            end: Page::containing_address(VirtAddr::new(AP_ENTRY_ADDRESS as u64 + 0x2000)),
-        },
+    );
+
+    dbg!(
+        &acpi_platform_info
+            .processor_info
+            .as_ref()
+            .unwrap()
+            .application_processors
     );
 
     for processor in &acpi_platform_info
@@ -182,14 +239,6 @@ pub fn init(acpi_platform_info: &PlatformInfo) {
             continue;
         }
         start_application_processor(processor, bootstrap_code_buf_ptr.as_mut_ptr());
-    }
-
-    {
-        let mut mapper = super::memory::MAPPER.lock();
-        let mapper = mapper.as_mut().unwrap();
-        let page = Page::<Size4KiB>::containing_address(bootstrap_code_buf_ptr);
-        let (_frame, flusher) = mapper.unmap(page).unwrap();
-        flusher.flush();
     }
 
     println!("[SMP] initialized");
@@ -220,6 +269,9 @@ pml4:
     mov $0x12345678, %edx
     mov %edx, %cr3
 
+    mov $'1', %al
+    outb %al, $0xe9
+
     // Enable the EFER.LMA bit, which enables compatibility mode and will make us switch
     // to long mode when we update the CS register.
     mov $0xc0000080, %ecx
@@ -227,13 +279,22 @@ pml4:
     or $(1 << 8), %eax
     wrmsr
 
+    mov $'2', %al
+    outb %al, $0xe9
+
     // Set the appropriate CR0 flags: Paging, Extension Type (math co-processor), and
     // Protected Mode.
     movl $((1 << 31) | (1 << 4) | (1 << 0)), %eax
     movl %eax, %cr0
 
+    mov $'3', %al
+    outb %al, $0xe9
+
     // Set up the GDT.
-    lgdtl ((gdt - ap_entry) + 0x4000)
+    lgdtl ({gdt_address})
+
+    mov $'4', %al
+    outb %al, $0xe9
 
 long_mode_jump:
     // A long jump is necessary in order to update the CS registry and properly switch to
@@ -246,6 +307,9 @@ long_mode:
     // The stack contains the ap_after_boot and ap_after_boot_param already,
     // so we need to pop them after.
     movq $0x1234567812345678, %rsp
+
+    mov $'5', %al
+    outb %al, $0xe9
 
     // This is the parameter that we pass to `ap_after_boot`
     popq %rax
@@ -269,13 +333,9 @@ long_mode:
     cli
     hlt
 
-.align 8
-gdt:
-    .short 15
-    .long 0xFFFF0000, 0xFFFF0000
-
 ap_end:
 "#,
+    gdt_address = const GDT_ADDRESS,
     options(att_syntax)
 );
 
@@ -285,7 +345,6 @@ mod pointers {
         pub fn pml4();
         pub fn long_mode_jump();
         pub fn long_mode();
-        pub fn gdt();
         pub fn ap_end();
     }
 }

@@ -21,7 +21,7 @@ rand = { version = "0.8", default_features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
-bootloader_api = "0.11"
+bootloader_api = { git = "https://github.com/rust-osdev/bootloader" }
 pic8259 = "0.10"
 acpi = "4.1"
 os_units = "0.4"

@@ -23,6 +23,7 @@ fn main() {
     if gdb {
         cmd.arg("-s");
     }
+    cmd.arg("-debugcon").arg("/dev/stdout");
 
     cmd.arg("-smp").arg("2");
 

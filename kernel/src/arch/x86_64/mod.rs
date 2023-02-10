@@ -1,5 +1,6 @@
 mod acpi;
 mod allocator;
+mod e9;
 mod framebuffer;
 mod gdt;
 mod interrupts;
@@ -33,6 +34,8 @@ const CONFIG: BootloaderConfig = {
 };
 
 fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
+    e9::debug("hey there :)");
+
     if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
         framebuffer::init(framebuffer.info(), framebuffer.buffer_mut());
     }
