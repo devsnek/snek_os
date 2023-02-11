@@ -299,7 +299,7 @@ pub fn init(acpi_platform_info: &PlatformInfo) {
 
     init_ioapic(apic_info);
 
-    // init_timing();
+    init_timing();
 
     x86_64::instructions::interrupts::enable();
 

@@ -62,7 +62,7 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
             .send_init_ipi(processor.local_apic_id);
     }
 
-    // let wait_after_init = sleep(Duration::from_millis(10));
+    let wait_after_init = sleep(Duration::from_millis(10));
 
     unsafe {
         core::ptr::copy_nonoverlapping(
@@ -76,6 +76,8 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
         let (tx, rx) = oneshot::channel();
         let boot_code = move || -> ! {
             let _ = tx.send(());
+            super::gdt::init();
+            // super::interrupts::init();
             crate::ap_main(crate::ProcessorInfo { id: processor_id });
         };
         (boot_code, rx)
@@ -166,10 +168,7 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
         ((GDT_ADDRESS + 2) as *mut u32).write(virt_addr.as_u64().try_into().unwrap());
     }
 
-    // crate::task::spawn_blocking(wait_after_init);
-    for i in 0..100_000_000 {
-        // owo
-    }
+    crate::task::spawn_blocking(wait_after_init);
 
     let mut attempts = 0;
     loop {
@@ -192,11 +191,6 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 .send_sipi((boot_fn >> 12) as u8, processor.local_apic_id);
         }
 
-        for i in 0..100_000_000_000u64 {
-            // owo
-        }
-
-        /*
         let ap_ready_timeout = sleep(Duration::from_secs(1));
         futures::pin_mut!(ap_ready_timeout);
         match crate::task::spawn_blocking(futures::future::select(
@@ -208,7 +202,6 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 break;
             }
         }
-        */
     }
 }
 
@@ -219,14 +212,6 @@ pub fn init(acpi_platform_info: &PlatformInfo) {
     let _mapped_page = quick_map(
         bootstrap_code_buf_ptr,
         PhysAddr::new(AP_ENTRY_ADDRESS as u64),
-    );
-
-    dbg!(
-        &acpi_platform_info
-            .processor_info
-            .as_ref()
-            .unwrap()
-            .application_processors
     );
 
     for processor in &acpi_platform_info
@@ -253,8 +238,8 @@ ap_entry:
     // When we enter here, the CS register is set to the value that we passed through the
     // SIPI, and the IP register is set to `0`.
     movw %cs, %ax
-    movw %ax, %ds
     movw %ax, %es
+    movw %ax, %ds
     movw %ax, %fs
     movw %ax, %gs
     movw %ax, %ss
@@ -269,9 +254,6 @@ pml4:
     mov $0x12345678, %edx
     mov %edx, %cr3
 
-    mov $'1', %al
-    outb %al, $0xe9
-
     // Enable the EFER.LMA bit, which enables compatibility mode and will make us switch
     // to long mode when we update the CS register.
     mov $0xc0000080, %ecx
@@ -279,22 +261,14 @@ pml4:
     or $(1 << 8), %eax
     wrmsr
 
-    mov $'2', %al
-    outb %al, $0xe9
+    // Set up the GDT. This instruction is relative to DS, which is set from CS,
+    // which is where the entrypoint is, so subtract ap_entry_address.
+    lgdtl ({gdt_address} - {ap_entry_address})
 
     // Set the appropriate CR0 flags: Paging, Extension Type (math co-processor), and
     // Protected Mode.
     movl $((1 << 31) | (1 << 4) | (1 << 0)), %eax
     movl %eax, %cr0
-
-    mov $'3', %al
-    outb %al, $0xe9
-
-    // Set up the GDT.
-    lgdtl ({gdt_address})
-
-    mov $'4', %al
-    outb %al, $0xe9
 
 long_mode_jump:
     // A long jump is necessary in order to update the CS registry and properly switch to
@@ -307,9 +281,6 @@ long_mode:
     // The stack contains the ap_after_boot and ap_after_boot_param already,
     // so we need to pop them after.
     movq $0x1234567812345678, %rsp
-
-    mov $'5', %al
-    outb %al, $0xe9
 
     // This is the parameter that we pass to `ap_after_boot`
     popq %rax
@@ -336,6 +307,7 @@ long_mode:
 ap_end:
 "#,
     gdt_address = const GDT_ADDRESS,
+    ap_entry_address = const AP_ENTRY_ADDRESS,
     options(att_syntax)
 );
 
@@ -352,8 +324,13 @@ mod pointers {
 type ApAfterBootParam = *mut Box<dyn FnOnce() -> ! + Send + 'static>;
 
 extern "C" fn ap_after_boot(to_exec: usize) -> ! {
-    // local_apics.init_local();
-    // interrupts::load_idt();
+    unsafe {
+        asm!("
+             mov al, '1'
+             out 0e9h, al
+       ");
+    }
+
     unsafe {
         let to_exec = to_exec as ApAfterBootParam;
         let to_exec = Box::from_raw(to_exec);
