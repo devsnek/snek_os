@@ -24,11 +24,8 @@ const CONFIG: BootloaderConfig = {
     mappings.dynamic_range_start = Some(0xFFFF_8000_0000_0000);
     mappings.dynamic_range_end = Some(0xFFFF_FFFF_FFFF_FFFF);
 
-    let frame_buffer = FrameBuffer::new_default();
-
     let mut config = BootloaderConfig::new_default();
     config.mappings = mappings;
-    config.frame_buffer = frame_buffer;
     config.kernel_stack_size = 80 * 1024 * 128;
     config
 };

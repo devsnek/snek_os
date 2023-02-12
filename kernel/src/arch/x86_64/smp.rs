@@ -76,7 +76,6 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
         let (tx, rx) = oneshot::channel();
         let boot_code = move || -> ! {
             let _ = tx.send(());
-            super::gdt::init();
             // super::interrupts::init();
             crate::ap_main(crate::ProcessorInfo { id: processor_id });
         };
@@ -106,6 +105,10 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
 
     unsafe {
         let pml4_offset = pointers::pml4 as usize - pointers::ap_entry as usize;
+
+        let compat_mode_jump_offset = pointers::compat_mode_jump as usize - pointers::ap_entry as usize;
+        let compat_mode_offset = pointers::compat_mode as usize - pointers::ap_entry as usize;
+
         let long_mode_jump_offset = pointers::long_mode_jump as usize - pointers::ap_entry as usize;
         let long_mode_offset = pointers::long_mode as usize - pointers::ap_entry as usize;
 
@@ -126,13 +129,27 @@ fn start_application_processor(processor: &Processor, bootstrap_code_buf_ptr: *m
                 .unwrap(),
         );
 
+        // set compat mode jump location
+        let compat_mode_jump_ptr = bootstrap_code_buf_ptr.add(compat_mode_jump_offset);
+        assert_eq!(
+            core::slice::from_raw_parts(compat_mode_jump_ptr as *const u8, 7),
+            &[0x66, 0xea, 0x78, 0x56, 0x34, 0x12, 0x08]
+        );
+        let compat_mode_jump_ptr = compat_mode_jump_ptr.add(2) as *mut u32;
+        assert_eq!(compat_mode_jump_ptr.read_unaligned(), 0x12345678);
+        compat_mode_jump_ptr.write_unaligned(
+            (bootstrap_code_buf_ptr.add(compat_mode_offset) as usize)
+                .try_into()
+                .unwrap(),
+        );
+
         // set long mode jump location
         let long_mode_jump_ptr = bootstrap_code_buf_ptr.add(long_mode_jump_offset);
         assert_eq!(
-            core::slice::from_raw_parts(long_mode_jump_ptr as *const u8, 7),
-            &[0x66, 0xea, 0x78, 0x56, 0x34, 0x12, 0x08]
+            core::slice::from_raw_parts(long_mode_jump_ptr as *const u8, 5),
+            &[0x68, 0x78, 0x56, 0x34, 0x12]
         );
-        let long_mode_jump_ptr = long_mode_jump_ptr.add(2) as *mut u32;
+        let long_mode_jump_ptr = long_mode_jump_ptr.add(1) as *mut u32;
         assert_eq!(long_mode_jump_ptr.read_unaligned(), 0x12345678);
         long_mode_jump_ptr.write_unaligned(
             (bootstrap_code_buf_ptr.add(long_mode_offset) as usize)
@@ -235,6 +252,8 @@ global_asm!(
 
 .code16
 ap_entry:
+    cli
+
     // When we enter here, the CS register is set to the value that we passed through the
     // SIPI, and the IP register is set to `0`.
     movw %cs, %ax
@@ -270,10 +289,25 @@ pml4:
     movl $((1 << 31) | (1 << 4) | (1 << 0)), %eax
     movl %eax, %cr0
 
-long_mode_jump:
-    // A long jump is necessary in order to update the CS registry and properly switch to
-    // long mode.
+compat_mode_jump:
+    // Long jump to update CS and switch to compat mode.
     ljmpl $8, $0x12345678
+
+.code32
+compat_mode:
+    lgdtl ({gdt_address} - {ap_entry_address})
+
+    mov $'2', %al
+    outb %al, $0xe9
+
+    mov $0x4800, %esp
+
+    // Long jump to update CS and switch to 64 bit mode mode.
+    // ljmpl $8, $0x12345678
+    pushw $8
+long_mode_jump:
+    push $0x12345678
+    retl
 
 .code64
 long_mode:
@@ -281,6 +315,9 @@ long_mode:
     // The stack contains the ap_after_boot and ap_after_boot_param already,
     // so we need to pop them after.
     movq $0x1234567812345678, %rsp
+
+    mov $'3', %al
+    outb %al, $0xe9
 
     // This is the parameter that we pass to `ap_after_boot`
     popq %rax
@@ -315,6 +352,8 @@ mod pointers {
     extern "C" {
         pub fn ap_entry();
         pub fn pml4();
+        pub fn compat_mode_jump();
+        pub fn compat_mode();
         pub fn long_mode_jump();
         pub fn long_mode();
         pub fn ap_end();
@@ -325,11 +364,17 @@ type ApAfterBootParam = *mut Box<dyn FnOnce() -> ! + Send + 'static>;
 
 extern "C" fn ap_after_boot(to_exec: usize) -> ! {
     unsafe {
-        asm!("
+        asm!(
+            "
              mov al, '1'
              out 0e9h, al
-       ");
+       "
+        );
     }
+
+    super::e9::debug("ap_after_boot");
+
+    super::gdt::init();
 
     unsafe {
         let to_exec = to_exec as ApAfterBootParam;

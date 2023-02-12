@@ -17,7 +17,7 @@ noto-sans-mono-bitmap = "0.2"
 mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
 maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "09c84f4e8171f60b1f0ab03627ba5040934dc3a7" }
 rand_xoshiro = "0.6"
-rand = { version = "0.8", default_features = false }
+rand = { version = "0.8", default-features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"

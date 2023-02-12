@@ -27,7 +27,6 @@ fn main() {
 
     cmd.arg("-smp").arg("2");
 
-    cmd.arg("-d").arg("int");
     cmd.arg("-no-reboot");
     cmd.arg("-no-shutdown");
 
