@@ -284,6 +284,13 @@ pml4:
     // which is where the entrypoint is, so subtract ap_entry_address.
     lgdtl ({gdt_address} - {ap_entry_address})
 
+    movw $0x10, %ax
+    movw %ax, %ds
+    movw %ax, %es
+    movw %ax, %fs
+    movw %ax, %gs
+    movw %ax, %ss
+
     // Set the appropriate CR0 flags: Paging, Extension Type (math co-processor), and
     // Protected Mode.
     movl $((1 << 31) | (1 << 4) | (1 << 0)), %eax
@@ -295,12 +302,12 @@ compat_mode_jump:
 
 .code32
 compat_mode:
-    lgdtl ({gdt_address} - {ap_entry_address})
+    // lgdtl ({gdt_address} - {ap_entry_address})
 
     mov $'2', %al
     outb %al, $0xe9
 
-    mov $0x4800, %esp
+    mov $0x4900, %esp
 
     // Long jump to update CS and switch to 64 bit mode mode.
     // ljmpl $8, $0x12345678
@@ -321,13 +328,6 @@ long_mode:
 
     // This is the parameter that we pass to `ap_after_boot`
     popq %rax
-
-    movw $0, %bx
-    movw %bx, %ds
-    movw %bx, %es
-    movw %bx, %fs
-    movw %bx, %gs
-    movw %bx, %ss
 
     // In the x86-64 calling convention, the RDI register is used to store the value of
     // the first parameter to pass to a function.
@@ -368,13 +368,16 @@ extern "C" fn ap_after_boot(to_exec: usize) -> ! {
             "
              mov al, '1'
              out 0e9h, al
-       "
-        );
+       ");
     }
 
-    super::e9::debug("ap_after_boot");
+    super::gdt::GDT.0.load();
+
+    super::e9::debug("meow 1");
 
     super::gdt::init();
+
+    super::e9::debug("meow 2");
 
     unsafe {
         let to_exec = to_exec as ApAfterBootParam;
