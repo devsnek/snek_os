@@ -201,7 +201,7 @@ extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStac
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     prologue!();
 
-    crate::drivers::i8042::interrupt(1);
+    crate::drivers::i8042::interrupt(i8042::Irq::Irq1);
 
     unsafe {
         end_of_interrupt();
@@ -213,7 +213,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
 extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
     prologue!();
 
-    crate::drivers::i8042::interrupt(2);
+    crate::drivers::i8042::interrupt(i8042::Irq::Irq12);
 
     unsafe {
         end_of_interrupt();

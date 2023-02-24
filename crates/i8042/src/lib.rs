@@ -36,12 +36,50 @@ use mouse::{Mouse, MouseKind};
 pub use pc_keyboard::DecodedKey;
 
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum Error {
+    /// The driver timed out while waiting to send data to or receive data from the controller.
     TimedOut,
+    /// The controller failed the self test.
     SelfTestFailed,
+    /// No available ports were found.
     NoPorts,
 }
 
+/// Identifies which IRQ is being processed.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Irq {
+    Irq1,
+    Irq12,
+}
+
+/// This trait provides the actual functionality of communicating with the 8042 controller to the
+/// driver instance.
+///
+/// One possible implementation would use x86 `inb` and `outb` instructions to
+/// communicate on ports `0x60` and `0x64`:
+/// ```rust
+/// struct MyImpl;
+///
+/// impl Impl for MyImpl {
+///     fn write_cmd(&mut self, cmd: u8) {
+///         unsafe { asm!("outb 064h, al", in(al) cmd) };
+///     }
+///     fn read_status(&mut self) -> u8 {
+///         let mut status;
+///         unsafe { asm!("inb al, 064h", out(al) status) };
+///         status
+///     }
+///     fn write_data(&mut self, cmd: u8) {
+///         unsafe { asm!("outb 060h, al", in(al) cmd) };
+///     }
+///     fn read_data(&mut self) -> u8 {
+///         let mut status;
+///         unsafe { asm!("inb al, 060h", out(al) status) };
+///         status
+///     }
+/// }
+/// ```
 pub trait Impl: core::fmt::Debug {
     fn write_cmd(&mut self, cmd: u8);
     fn read_status(&mut self) -> u8;
@@ -49,6 +87,7 @@ pub trait Impl: core::fmt::Debug {
     fn read_data(&mut self) -> u8;
 }
 
+/// A driver for the Intel 8042 PS/2 Controller.
 #[derive(Debug)]
 pub struct Driver8042<T: Impl> {
     r#impl: T,
@@ -57,6 +96,8 @@ pub struct Driver8042<T: Impl> {
 }
 
 impl<T: Impl> Driver8042<T> {
+    /// Create a new instance of the driver. An implementation of `Impl` must be passed in to
+    /// provide the driver with hooks for communicating with the 8042 controller.
     pub const fn new(r#impl: T) -> Self {
         Self {
             r#impl,
@@ -65,7 +106,11 @@ impl<T: Impl> Driver8042<T> {
         }
     }
 
-    pub fn init(&mut self) -> Result<(), Error> {
+    /// Initialize the driver.
+    ///
+    /// SAFETY: You must ensure that your system has an 8042 controller. One possible way of doing
+    /// this is to check the presence via ACPI tables.
+    pub unsafe fn init(&mut self) -> Result<(), Error> {
         // Disable controller
         self.write_cmd(0xAD)?;
         self.write_cmd(0xA7)?;
@@ -142,25 +187,26 @@ impl<T: Impl> Driver8042<T> {
         Ok(())
     }
 
-    pub fn interrupt(&mut self, port_num: u8) -> Option<Change> {
-        let mask = match port_num {
-            1 => 0x01,
-            2 => 0x20,
-            _ => return None,
+    /// The 8042 controller is connected to IRQ1 and IRQ12. You should call this function when
+    /// these are asserted in order to update the driver with new data and receive the resulting
+    /// processed keyboard and mouse events.
+    pub fn interrupt(&mut self, irq: Irq) -> Option<Change> {
+        let mask = match irq {
+            Irq::Irq1 => 0x01,
+            Irq::Irq12 => 0x20,
         };
         if self.r#impl.read_status() & mask == 0 {
             return None;
         }
         let data = self.r#impl.read_data();
-        let port = match port_num {
-            1 => &mut self.port1,
-            2 => &mut self.port2,
-            _ => return None,
+        let port = match irq {
+            Irq::Irq1 => &mut self.port1,
+            Irq::Irq12 => &mut self.port2,
         };
         if let Some(port) = port {
             let (data, key) = port.handle_data(data);
             if let Some(data) = data {
-                if port_num == 2 {
+                if irq == Irq::Irq12 {
                     self.r#impl.write_cmd(0xD4);
                 }
                 self.r#impl.write_data(data);
@@ -227,9 +273,12 @@ impl<T: Impl> Driver8042<T> {
     }
 }
 
+/// A change in the state of the keyboard or the mouse.
 #[derive(Debug)]
 pub enum Change {
+    /// A change in the state of the keyboard.
     Keyboard(DecodedKey),
+    /// A change in the state of the mouse.
     Mouse(MouseState),
 }
 

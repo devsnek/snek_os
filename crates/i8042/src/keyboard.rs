@@ -143,7 +143,6 @@ impl Keyboard {
                 },
             },
             State::Normal(ref mut keyboard) => match data {
-                // Error/Buffer Overrun
                 0x00 | 0xFF | 0xAA | 0xFC | 0xFD | 0xEE | 0xFA | 0xFE => (None, None),
                 _ => {
                     let key = keyboard.handle_data(data);

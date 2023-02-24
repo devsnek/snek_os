@@ -12,12 +12,18 @@ enum State {
     WaitByte3(u8, u8),
 }
 
+/// The state of the mouse.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MouseState {
-    pub x: i16,
-    pub y: i16,
+    /// The current x coordinate of the mouse, originating from the left.
+    pub x: u16,
+    /// The current y coordinate of the mouse, originating from the top.
+    pub y: u16,
+    /// Whether the left button is pressed.
     pub left: bool,
+    /// Whether the right button is pressed.
     pub right: bool,
+    /// Whether the middle button is pressed.
     pub middle: bool,
 }
 
@@ -34,8 +40,8 @@ impl Mouse {
             Self {
                 state: State::Ack,
                 mouse_state: MouseState {
-                    x: i16::MAX / 2,
-                    y: i16::MAX / 2,
+                    x: 0,
+                    y: 0,
                     middle: false,
                     right: false,
                     left: false,
@@ -65,8 +71,8 @@ impl Mouse {
                 let dy = get_signed_9(((b1 >> 7) & 1) != 0, ((b1 >> 5) & 1) != 0, data);
 
                 let new_state = MouseState {
-                    x: self.mouse_state.x.saturating_add(dx),
-                    y: self.mouse_state.y.saturating_add(dy),
+                    x: self.mouse_state.x.saturating_add_signed(dx),
+                    y: self.mouse_state.y.saturating_add_signed(-dy),
                     left: b1 & (1 << 0) != 0,
                     right: b1 & (1 << 1) != 0,
                     middle: b1 & (1 << 2) != 0,

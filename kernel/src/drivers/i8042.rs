@@ -4,11 +4,8 @@ use core::{
     task::{Context, Poll},
 };
 use crossbeam_queue::ArrayQueue;
-use futures_util::{
-    stream::{Stream, StreamExt},
-    task::AtomicWaker,
-};
-use i8042::{Change, DecodedKey, Driver8042};
+use futures_util::{stream::Stream, task::AtomicWaker};
+use i8042::{Change, DecodedKey, Driver8042, Irq, MouseState};
 
 #[cfg(target_arch = "x86_64")]
 use x86_64::instructions::port::Port;
@@ -37,37 +34,46 @@ impl i8042::Impl for DriverImpl {
 
 static mut DRIVER: Driver8042<DriverImpl> = Driver8042::new(DriverImpl);
 
-pub fn init() {
-    unsafe {
-        DRIVER.init().unwrap();
-    }
-}
-
 static KEY_QUEUE: OnceCell<ArrayQueue<DecodedKey>> = OnceCell::uninit();
-static WAKER: AtomicWaker = AtomicWaker::new();
+static KEY_WAKER: AtomicWaker = AtomicWaker::new();
 
-pub fn interrupt(port: u8) {
-    if let Some(change) = unsafe { DRIVER.interrupt(port) } {
+static MOUSE_QUEUE: OnceCell<ArrayQueue<MouseState>> = OnceCell::uninit();
+static MOUSE_WAKER: AtomicWaker = AtomicWaker::new();
+
+pub fn interrupt(irq: Irq) {
+    if let Some(change) = unsafe { DRIVER.interrupt(irq) } {
         match change {
             Change::Keyboard(key) => {
                 if let Ok(queue) = KEY_QUEUE.try_get() {
                     if queue.push(key).is_ok() {
-                        WAKER.wake();
+                        KEY_WAKER.wake();
                     }
                 }
             }
-            Change::Mouse(_state) => {}
+            Change::Mouse(state) => {
+                if let Ok(queue) = MOUSE_QUEUE.try_get() {
+                    if queue.push(state).is_ok() {
+                        MOUSE_WAKER.wake();
+                    }
+                }
+            }
         }
     }
+}
+
+pub fn init() {
+    unsafe {
+        DRIVER.init().unwrap();
+    }
+
+    KEY_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
+    MOUSE_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
 }
 
 pub struct KeyStream {}
 
 impl KeyStream {
     pub fn new() -> Self {
-        KEY_QUEUE
-            .try_init_once(|| ArrayQueue::new(32))
-            .expect("KeyStream::new should only be called once");
         KeyStream {}
     }
 }
@@ -75,18 +81,18 @@ impl KeyStream {
 impl Stream for KeyStream {
     type Item = DecodedKey;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<DecodedKey>> {
-        let queue = KEY_QUEUE.try_get().expect("KEY_QUEUE not initialized");
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let queue = KEY_QUEUE.try_get().expect("MOUSE_QUEUE not initialized");
 
         // fast path
         if let Some(key) = queue.pop() {
             return Poll::Ready(Some(key));
         }
 
-        WAKER.register(cx.waker());
+        KEY_WAKER.register(cx.waker());
         match queue.pop() {
             Some(key) => {
-                WAKER.take();
+                KEY_WAKER.take();
                 Poll::Ready(Some(key))
             }
             None => Poll::Pending,
@@ -94,15 +100,32 @@ impl Stream for KeyStream {
     }
 }
 
-pub async fn dispatch_keypresses() {
-    let mut keys = KeyStream::new();
+pub struct MouseStream {}
 
-    while let Some(key) = keys.next().await {
-        match key {
-            DecodedKey::Unicode(c) => {
-                print!("{c}");
+impl MouseStream {
+    pub fn new() -> Self {
+        MouseStream {}
+    }
+}
+
+impl Stream for MouseStream {
+    type Item = MouseState;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let queue = MOUSE_QUEUE.try_get().expect("MOUSE_QUEUE not initialized");
+
+        // fast path
+        if let Some(state) = queue.pop() {
+            return Poll::Ready(Some(state));
+        }
+
+        MOUSE_WAKER.register(cx.waker());
+        match queue.pop() {
+            Some(state) => {
+                MOUSE_WAKER.take();
+                Poll::Ready(Some(state))
             }
-            DecodedKey::RawKey(_key) => {}
+            None => Poll::Pending,
         }
     }
 }
