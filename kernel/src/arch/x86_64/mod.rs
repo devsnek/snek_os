@@ -4,9 +4,11 @@ mod e9;
 mod framebuffer;
 mod gdt;
 mod interrupts;
+mod local;
 mod memory;
+mod pci;
 mod pit;
-mod smp;
+// mod smp;
 
 use bootloader_api::{BootInfo, BootloaderConfig};
 use x86_64::PhysAddr;
@@ -44,11 +46,16 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
         &mut boot_info.memory_regions,
     );
 
-    let acpi_platform_info = acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
+    local::init();
+
+    let (acpi_platform_info, pci_regions) =
+        acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
 
     interrupts::init(&acpi_platform_info);
 
-    smp::init(&acpi_platform_info);
+    pci::init(pci_regions, boot_info.physical_memory_offset.into());
+
+    // smp::init(&acpi_platform_info);
 
     crate::main();
 }
@@ -56,6 +63,7 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
 bootloader_api::entry_point!(kernel_start, config = &CONFIG);
 
 pub use framebuffer::_print;
+pub use local::Local;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

@@ -8,14 +8,14 @@ use x2apic::{
     lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
-    instructions::port::Port,
-    registers::control::Cr2,
+    registers::{control::Cr2, segmentation::GS},
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
     PhysAddr,
 };
 
 const PS2_KEYBOARD_IRQ: u8 = 1;
 const PIT_TIMER_IRQ: u8 = 2;
+const PS2_MOUSE_IRQ: u8 = 12;
 
 const PIC_1_OFFSET: u8 = 32;
 const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
@@ -23,6 +23,7 @@ const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 const IOAPIC_START: u8 = PIC_2_OFFSET + 8;
 const IOAPIC_PS2_KEYBOARD: usize = IOAPIC_START as usize + PS2_KEYBOARD_IRQ as usize;
 const IOAPIC_PIT_TIMER: usize = IOAPIC_START as usize + PIT_TIMER_IRQ as usize;
+const IOAPIC_PS2_MOUSE: usize = IOAPIC_START as usize + PS2_MOUSE_IRQ as usize;
 
 const NUM_VECTORS: usize = 256;
 const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
@@ -51,22 +52,41 @@ lazy_static! {
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
         idt.alignment_check.set_handler_fn(alignment_check_handler);
 
+        idt[IOAPIC_PS2_KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
+        idt[IOAPIC_PIT_TIMER].set_handler_fn(pit_timer_interrupt_handler);
+        idt[IOAPIC_PS2_MOUSE].set_handler_fn(mouse_interrupt_handler);
+
         idt[LOCAL_APIC_ERROR].set_handler_fn(error_interrupt_handler);
         idt[LOCAL_APIC_TIMER].set_handler_fn(apic_timer_interrupt_handler);
         idt[LOCAL_APIC_SPURIOUS].set_handler_fn(spurious_interrupt_handler);
-
-        idt[IOAPIC_PS2_KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
-        idt[IOAPIC_PIT_TIMER].set_handler_fn(pit_timer_interrupt_handler);
 
         idt
     };
 }
 
+macro_rules! prologue {
+    () => {
+        unsafe { GS::swap() };
+    };
+}
+
+macro_rules! epilogue {
+    () => {
+        unsafe { GS::swap() }
+    };
+}
+
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
+    prologue!();
+
     println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, _error_code: u64) {
+    prologue!();
+
     panic!("INVALID TSS {:#?}", stack_frame);
 }
 
@@ -74,31 +94,38 @@ extern "x86-interrupt" fn segment_not_present_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) {
+    prologue!();
+
     println!("SEGMENT NOT PRESENT {:#?}", stack_frame);
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: u64,
 ) {
-    println!(
+    prologue!();
+
+    panic!(
         "GENERAL PROTECTION FAULT: {} {:#?}",
         error_code, stack_frame
     );
-    crate::arch::halt_loop();
 }
 
 extern "x86-interrupt" fn page_fault_handler(
     stack_frame: InterruptStackFrame,
     error_code: PageFaultErrorCode,
 ) {
+    prologue!();
+
     let address = Cr2::read();
     let protv = error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION);
     let write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
     let user = error_code.contains(PageFaultErrorCode::USER_MODE);
     let malformed = error_code.contains(PageFaultErrorCode::MALFORMED_TABLE);
     let ins = error_code.contains(PageFaultErrorCode::INSTRUCTION_FETCH);
-    println!(
+    panic!(
         "PAGE FAULT ({}{}{}{}{}at 0x{:x?})\n{:#?}",
         if protv { "protection-violation " } else { "" },
         if write { "read-only " } else { "" },
@@ -108,13 +135,14 @@ extern "x86-interrupt" fn page_fault_handler(
         address.as_u64(),
         stack_frame
     );
-    crate::arch::halt_loop();
 }
 
 extern "x86-interrupt" fn alignment_check_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) {
+    prologue!();
+
     panic!("ALIGNMENT CHECK {:#?}", stack_frame);
 }
 
@@ -122,44 +150,76 @@ extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
-    println!("DOUBLE FAULT: {:#?}", stack_frame);
-    crate::arch::halt_loop();
+    prologue!();
+
+    panic!("DOUBLE FAULT: {:#?}", stack_frame);
 }
 
 extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFrame) {
+    prologue!();
+
     println!("ERROR: {:#?}", stack_frame);
     unsafe {
         end_of_interrupt();
     }
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn apic_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
     crate::task::timer::on_tick();
     unsafe {
         end_of_interrupt();
     }
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn pit_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
     super::pit::on_tick();
     unsafe {
         end_of_interrupt();
     }
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
     unsafe {
         end_of_interrupt();
     }
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    let mut port = Port::new(0x60);
-    let scancode: u8 = unsafe { port.read() };
-    crate::task::keyboard::add_scancode(scancode);
+    prologue!();
+
+    crate::drivers::i8042::interrupt(1);
+
     unsafe {
         end_of_interrupt();
     }
+
+    epilogue!();
+}
+
+extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
+    crate::drivers::i8042::interrupt(2);
+
+    unsafe {
+        end_of_interrupt();
+    }
+
+    epilogue!();
 }
 
 #[inline(always)]
@@ -217,6 +277,7 @@ fn init_ioapic(apic_info: &ApicInfo) {
     }
 
     unsafe {
+        ioapic.enable_irq(PS2_MOUSE_IRQ);
         ioapic.enable_irq(PIT_TIMER_IRQ);
         ioapic.enable_irq(PS2_KEYBOARD_IRQ);
     }

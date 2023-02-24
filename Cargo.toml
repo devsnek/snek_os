@@ -11,4 +11,7 @@ snek_kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none
 ovmf-prebuilt = "0.1.0-alpha.1"
 
 [workspace]
-members = ["kernel"]
+members = [
+  "kernel",
+  "crates/i8042"
+]

@@ -30,11 +30,14 @@ use prelude::*;
 #[macro_use]
 mod debug;
 mod arch;
+mod drivers;
 mod task;
+mod util;
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("panic: {}", info);
+
     arch::halt_loop();
 }
 
@@ -46,7 +49,11 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
 pub fn main() -> ! {
     println!("Welcome to SNEK OS");
 
+    drivers::i8042::init();
+
     task::start();
+
+    println!("tasks finished?");
 
     arch::halt_loop();
 }

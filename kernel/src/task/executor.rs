@@ -1,3 +1,4 @@
+use crate::arch::Local;
 use conquer_once::spin::OnceCell;
 use core::{
     cell::Cell,
@@ -9,29 +10,8 @@ use maitake::{
     task::JoinHandle,
 };
 use rand::{Rng, SeedableRng};
-use spin::Mutex;
 
-struct Hack<T> {
-    inner: Mutex<T>,
-}
-
-impl<T> Hack<T> {
-    const fn new(v: T) -> Self {
-        Self {
-            inner: Mutex::new(v),
-        }
-    }
-
-    fn with<F, U>(&self, f: F) -> U
-    where
-        F: FnOnce(&T) -> U,
-    {
-        let v = self.inner.lock();
-        f(&v)
-    }
-}
-
-static SCHEDULER: Hack<Cell<Option<&'static StaticScheduler>>> = Hack::new(Cell::new(None));
+static SCHEDULER: Local<Cell<Option<&'static StaticScheduler>>> = Local::new(|| Cell::new(None));
 
 static RUNTIME: Runtime = {
     const UNINIT_SCHEDULER: OnceCell<StaticScheduler> = OnceCell::uninit();
@@ -155,7 +135,6 @@ impl Executor {
         const MAX_STEAL_ATTEMPTS: usize = 16;
         const MAX_STOLEN_PER_TICK: usize = 256;
 
-        // first, try to steal from the injector queue.
         if let Ok(injector) = RUNTIME.injector.try_steal() {
             return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
         }

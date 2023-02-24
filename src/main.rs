@@ -6,6 +6,7 @@ fn main() {
     let use_kvm = !std::env::args().any(|a| &a == "--no-kvm");
     let gdb = std::env::args().any(|a| &a == "--gdb");
 
+    // let mut cmd = std::process::Command::new("../qemu/bin/debug/native/qemu-system-x86_64");
     let mut cmd = std::process::Command::new("qemu-system-x86_64");
     if use_bios {
         cmd.arg("-drive")
@@ -20,12 +21,14 @@ fn main() {
         cmd.arg("-enable-kvm");
     }
 
+    cmd.args(["-M", "q35"]);
+
     if gdb {
         cmd.arg("-s");
     }
-    cmd.arg("-debugcon").arg("/dev/stdout");
+    cmd.args(["-debugcon", "/dev/stdout"]);
 
-    cmd.arg("-smp").arg("2");
+    cmd.args(["-smp", "2"]);
 
     cmd.arg("-no-reboot");
     cmd.arg("-no-shutdown");

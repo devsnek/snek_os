@@ -15,6 +15,9 @@ fn main() {
         .create_disk_image(&bios_path)
         .unwrap();
 
+    println!("cargo:rerun-if-changed={}", uefi_path.display());
+    println!("cargo:rerun-if-changed={}", bios_path.display());
+
     println!("cargo:rustc-env=UEFI_PATH={}", uefi_path.display());
     println!("cargo:rustc-env=BIOS_PATH={}", bios_path.display());
 

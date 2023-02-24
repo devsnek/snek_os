@@ -486,6 +486,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "i8042"
+version = "0.1.0"
+dependencies = [
+ "pc-keyboard",
+]
+
+[[package]]
 name = "image"
 version = "0.24.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -733,9 +740,16 @@ checksum = "d01a5bd0424d00070b0098dd17ebca6f961a959dead1dbcbbbc1d1cd8d3deeba"
 
 [[package]]
 name = "pc-keyboard"
-version = "0.6.1"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0ad9805165d0672a3efa682cac952870d8b05d98e02e08063ca7db597005338"
+checksum = "ed089a1fbffe3337a1a345501c981f1eb1e47e69de5a40e852433e12953c3174"
+
+[[package]]
+name = "pci_types"
+version = "0.2.0"
+dependencies = [
+ "bit_field",
+]
 
 [[package]]
 name = "pic8259"
@@ -1035,6 +1049,7 @@ dependencies = [
  "crossbeam-queue",
  "futures",
  "futures-util",
+ "i8042",
  "image",
  "lazy_static",
  "linked_list_allocator",
@@ -1042,7 +1057,7 @@ dependencies = [
  "mycelium-bitfield 0.1.2 (git+https://github.com/hawkw/mycelium.git?rev=f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3)",
  "noto-sans-mono-bitmap",
  "os_units",
- "pc-keyboard",
+ "pci_types",
  "pic8259",
  "rand",
  "rand_xoshiro",

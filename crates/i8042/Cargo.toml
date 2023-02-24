@@ -1,0 +1,8 @@
+[package]
+name = "i8042"
+version = "0.1.0"
+authors = ["Gus Caplan <me@gus.host>"]
+edition = "2021"
+
+[dependencies]
+pc-keyboard = "0.7"

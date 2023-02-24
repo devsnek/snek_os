@@ -1,4 +1,6 @@
-use acpi::{platform::PlatformInfo, AcpiHandler, AcpiTables, PhysicalMapping};
+use acpi::{
+    mcfg::PciConfigRegions, platform::PlatformInfo, AcpiHandler, AcpiTables, PhysicalMapping,
+};
 use x86_64::{PhysAddr, VirtAddr};
 
 #[derive(Clone)]
@@ -49,9 +51,11 @@ impl AcpiHandler for AcpiHandlerImpl {
     }
 }
 
-pub fn init(rsdp_address: PhysAddr) -> PlatformInfo {
+pub fn init(rsdp_address: PhysAddr) -> (PlatformInfo, PciConfigRegions) {
     let acpi_tables =
         unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _) }.unwrap();
 
-    acpi_tables.platform_info().unwrap()
+    let pci_regions = PciConfigRegions::new(&acpi_tables).unwrap();
+
+    (acpi_tables.platform_info().unwrap(), pci_regions)
 }

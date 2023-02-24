@@ -30,3 +30,11 @@ macro_rules! dbg {
         ($($crate::dbg!($val)),+,)
     };
 }
+
+#[macro_export]
+macro_rules! format {
+    ($($arg:tt)*) => {{
+        let res = alloc::fmt::format(format_args!($($arg)*));
+        res
+    }}
+}
