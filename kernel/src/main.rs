@@ -49,7 +49,7 @@ fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
 pub fn main() -> ! {
     println!("Welcome to SNEK OS");
 
-    drivers::i8042::init();
+    drivers::init();
 
     task::start();
 

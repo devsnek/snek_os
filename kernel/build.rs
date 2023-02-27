@@ -1,9 +1,11 @@
 fn main() {
+    let out_dir = std::env::var("OUT_DIR").unwrap();
+
     for file in ["logo", "logo_text"] {
         let mut buf: Vec<u8> = Vec::new();
 
-        println!("cargo:rerun-if-changed=./{file}.png");
-        let img = image::open(format!("./{file}.png")).unwrap();
+        println!("cargo:rerun-if-changed=./assets/{file}.png");
+        let img = image::open(format!("./assets/{file}.png")).unwrap();
         let image::DynamicImage::ImageRgba8(img) = img else { panic!() };
 
         buf.extend(img.width().to_be_bytes());
@@ -13,6 +15,6 @@ fn main() {
             buf.extend(pixel.0);
         }
 
-        std::fs::write(format!("./{file}.rgba"), buf).unwrap();
+        std::fs::write(format!("{out_dir}/{file}.rgba"), buf).unwrap();
     }
 }

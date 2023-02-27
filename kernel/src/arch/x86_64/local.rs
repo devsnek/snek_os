@@ -25,8 +25,7 @@ impl<T: 'static> Local<T> {
 
     fn next_id() -> usize {
         static ID: AtomicUsize = AtomicUsize::new(0);
-        let id = ID.fetch_add(1, Ordering::Relaxed);
-        id
+        ID.fetch_add(1, Ordering::Relaxed)
     }
 
     pub fn with<U, F>(&self, f: F) -> U

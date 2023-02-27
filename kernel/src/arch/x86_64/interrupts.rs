@@ -277,9 +277,9 @@ fn init_ioapic(apic_info: &ApicInfo) {
     }
 
     unsafe {
-        ioapic.enable_irq(PS2_MOUSE_IRQ);
+        // ioapic.enable_irq(PS2_MOUSE_IRQ);
         ioapic.enable_irq(PIT_TIMER_IRQ);
-        ioapic.enable_irq(PS2_KEYBOARD_IRQ);
+        // ioapic.enable_irq(PS2_KEYBOARD_IRQ);
     }
 
     println!("[IOAPIC] initialized");

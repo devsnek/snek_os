@@ -3,7 +3,15 @@ use std::path::PathBuf;
 fn main() {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
 
-    let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_SNEK_KERNEL_snek_kernel").unwrap());
+    // let kernel = PathBuf::from(std::env::var_os("CARGO_BIN_FILE_SNEK_KERNEL_snek_kernel").unwrap());
+    /*
+    assert!(std::process::Command::new("cargo")
+        .args(["build", "-p", "snek_kernel", "--target", "x86_64-unknown-none"])
+        .status()
+        .unwrap()
+        .success());
+    */
+    let kernel = std::fs::canonicalize(PathBuf::from("./target/x86_64-unknown-none/debug/snek_kernel")).unwrap();
 
     let uefi_path = out_dir.join("uefi.img");
     bootloader::UefiBoot::new(&kernel)

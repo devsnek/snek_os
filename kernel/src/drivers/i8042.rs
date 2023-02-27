@@ -82,7 +82,9 @@ impl Stream for KeyStream {
     type Item = DecodedKey;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let queue = KEY_QUEUE.try_get().expect("MOUSE_QUEUE not initialized");
+        let Ok(queue) = KEY_QUEUE.try_get() else {
+            return Poll::Ready(None);
+        };
 
         // fast path
         if let Some(key) = queue.pop() {
@@ -112,7 +114,9 @@ impl Stream for MouseStream {
     type Item = MouseState;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let queue = MOUSE_QUEUE.try_get().expect("MOUSE_QUEUE not initialized");
+        let Ok(queue) = MOUSE_QUEUE.try_get() else {
+            return Poll::Ready(None);
+        };
 
         // fast path
         if let Some(state) = queue.pop() {

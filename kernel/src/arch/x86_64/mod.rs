@@ -8,7 +8,6 @@ mod local;
 mod memory;
 mod pci;
 mod pit;
-// mod smp;
 
 use bootloader_api::{BootInfo, BootloaderConfig};
 use x86_64::PhysAddr;
@@ -48,14 +47,12 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
 
     local::init();
 
-    let (acpi_platform_info, pci_regions) =
+    let (acpi_platform_info, pci_regions, _implements_8042) =
         acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
 
     interrupts::init(&acpi_platform_info);
 
     pci::init(pci_regions, boot_info.physical_memory_offset.into());
-
-    // smp::init(&acpi_platform_info);
 
     crate::main();
 }

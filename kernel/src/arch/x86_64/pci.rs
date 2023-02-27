@@ -1,6 +1,7 @@
 use acpi::PciConfigRegions;
 use alloc::collections::BTreeMap;
-use pci_types::{Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader};
+use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
+use pci_types::{Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader};
 use x86_64::VirtAddr;
 
 struct Resolver {
@@ -92,6 +93,7 @@ impl Resolver {
             match header.header_type(self) {
                 HeaderType::Endpoint => {
                     let endpoint_header = EndpointHeader::from_header(header, self).unwrap();
+                    let (sub_vendor_id, sub_device_id) = endpoint_header.subsystem(self);
                     let bars = {
                         let mut bars = [None; 6];
 
@@ -115,19 +117,26 @@ impl Resolver {
                     self.devices.insert(
                         address,
                         PciDevice {
-                            vendor_id,
-                            device_id,
-                            revision,
+                            address,
                             class,
                             sub_class,
                             interface,
+                            vendor_id,
+                            device_id,
+                            sub_vendor_id,
+                            sub_device_id,
+                            revision,
                             bars,
                         },
                     );
                 }
                 HeaderType::PciPciBridge => {
-                    // let header = PciPciBridgeHeader::from_header(header, self).unwrap();
-                    // self.scan_bus(header.secondary_bus_number(self));
+                    let header = PciPciBridgeHeader::from_header(header, self).unwrap();
+                    let start = header.secondary_bus_number(self);
+                    let end = header.subordinate_bus_number(self);
+                    for bus_id in start..=end {
+                        self.scan_bus(bus_id);
+                    }
                 }
                 _ => {
                     // unknown header
@@ -138,75 +147,33 @@ impl Resolver {
 }
 
 pub struct PciDevice {
-    pub vendor_id: u16,
-    pub device_id: u16,
-    pub revision: u8,
+    pub address: PciAddress,
     pub class: u8,
     pub sub_class: u8,
     pub interface: u8,
+    pub vendor_id: u16,
+    pub device_id: u16,
+    pub sub_vendor_id: u16,
+    pub sub_device_id: u16,
+    pub revision: u8,
     pub bars: [Option<Bar>; 6],
 }
 
 impl PciDevice {
-    pub fn class_info(&self) -> &'static str {
-        match (self.class, self.sub_class, self.interface) {
-            (0x00, 0x00, _) => "Non-VGA-Compatible Unclassified Device",
-            (0x00, 0x01, _) => "VGA-Compatible Unclassified Device",
-            (0x00, _, _) => "Unclassified Device",
-            (0x01, 0x01, _) => "IDE Controller",
-            (0x01, 0x02, _) => "Floppy Disk Controller",
-            (0x01, 0x05, _) => "ATA Controller",
-            (0x01, 0x06, _) => "SATA Controller",
-            (0x01, 0x07, _) => "Serial Attached SCSI Controller",
-            (0x01, 0x08, 0x01) => "NVMHCI Device",
-            (0x01, 0x08, 0x02) => "NVME Device",
-            (0x01, 0x08, _) => "Non-Volatile Memory Controller",
-            (0x01, _, _) => "Mass Storage Controller",
-            (0x02, 0x00, _) => "Ethernet Controller",
-            (0x02, _, _) => "Network Controller",
-            (0x03, 0x00, _) => "VGA-Compatible Controller",
-            (0x03, _, _) => "Display Controller",
-            (0x04, _, _) => "Multimedia Controller",
-            (0x05, _, _) => "Memory Controller",
-            (0x06, 0x00, _) => "Host Bridge",
-            (0x06, 0x01, _) => "ISA Bridge",
-            (0x06, 0x02, _) => "EISA Bridge",
-            (0x06, 0x03, _) => "MCA Bridge",
-            (0x06, 0x04, _) => "PCI-to-PCI Bridge",
-            (0x06, 0x05, _) => "PCMCIA Bridge",
-            (0x06, 0x06, _) => "NuBus Bridge",
-            (0x06, 0x07, _) => "CardBus Bridge",
-            (0x06, 0x08, _) => "RACEway Bridge",
-            (0x06, 0x09, _) => "PCI-to-PCI Bridge",
-            (0x06, 0x0A, _) => "InfiniBand-to-PCI Host Bridge",
-            (0x06, _, _) => "Bridge",
-            (0x07, _, _) => "Simple Communication Controller",
-            (0x08, _, _) => "Base System Peripheral",
-            (0x09, _, _) => "Input Device Controller",
-            (0x0a, _, _) => "Docking Station",
-            (0x0b, _, _) => "Processor",
-            (0x0c, 0x00, _) => "FireWire Controller",
-            (0x0c, 0x02, _) => "SSA",
-            (0x0c, 0x03, 0x00) => "UHCI controller",
-            (0x0c, 0x03, 0x10) => "OHCI controller",
-            (0x0c, 0x03, 0x20) => "EHCI controller",
-            (0x0c, 0x03, 0x30) => "XHCI controller",
-            (0x0c, 0x03, 0xFE) => "USB device",
-            (0x0c, 0x03, _) => "USB Controller",
-            (0x0c, 0x04, _) => "Fibre Controller",
-            (0x0c, 0x05, _) => "SMBus Controller",
-            (0x0c, 0x06, _) => "InfiniBand Controller",
-            (0x0c, 0x07, _) => "IPMI Interface",
-            (0x0c, _, _) => "Serial Bus Controller",
-            (0x0d, _, _) => "Wireless Controller",
-            (0x0e, _, _) => "Intelligent Controller",
-            (0x0f, _, _) => "Satellite Communication Controller",
-            (0x10, _, _) => "Encryption Controller",
-            (0x11, _, _) => "Signal Processing Controller",
-            (0x12, _, _) => "Processing Accelerator",
-            (0x13, _, _) => "Non-Essential Instrumentation",
-            (0x40, _, _) => "Co-Processor",
-            _ => "Unknown Device",
+    pub fn name(&self) -> String {
+        if let Some(device) = DeviceInfo::from_vid_pid(self.vendor_id, self.device_id) {
+            format!("{} {}", device.vendor().name(), device.name())
+        } else {
+            SubclassInfo::from_cid_sid(self.class, self.sub_class)
+                .map(|subclass| {
+                    subclass
+                        .prog_ifs()
+                        .find(|i| i.id() == self.interface)
+                        .map(|i| i.name())
+                        .unwrap_or(subclass.name())
+                })
+                .unwrap_or("Unknown Device")
+                .to_owned()
         }
     }
 }
@@ -224,7 +191,7 @@ pub fn init(regions: PciConfigRegions, physical_offset: Option<u64>) {
             "PCI {address} {:04x}:{:04x} {}",
             device.vendor_id,
             device.device_id,
-            device.class_info()
+            device.name()
         );
     }
 

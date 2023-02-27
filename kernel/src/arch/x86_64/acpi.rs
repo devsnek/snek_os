@@ -1,5 +1,6 @@
 use acpi::{
-    mcfg::PciConfigRegions, platform::PlatformInfo, AcpiHandler, AcpiTables, PhysicalMapping,
+    fadt::Fadt, mcfg::PciConfigRegions, platform::PlatformInfo, sdt::Signature, AcpiHandler,
+    AcpiTables, PhysicalMapping,
 };
 use x86_64::{PhysAddr, VirtAddr};
 
@@ -51,11 +52,25 @@ impl AcpiHandler for AcpiHandlerImpl {
     }
 }
 
-pub fn init(rsdp_address: PhysAddr) -> (PlatformInfo, PciConfigRegions) {
+pub fn init(rsdp_address: PhysAddr) -> (PlatformInfo, PciConfigRegions, bool) {
     let acpi_tables =
         unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _) }.unwrap();
 
     let pci_regions = PciConfigRegions::new(&acpi_tables).unwrap();
 
-    (acpi_tables.platform_info().unwrap(), pci_regions)
+    let fadt = unsafe {
+        acpi_tables
+            .get_sdt::<Fadt>(Signature::FADT)
+            .unwrap()
+            .unwrap()
+    };
+
+    let implements_8042 =
+        ::core::clone::Clone::clone(&{ fadt.iapc_boot_arch }).motherboard_implements_8042();
+
+    (
+        acpi_tables.platform_info().unwrap(),
+        pci_regions,
+        implements_8042,
+    )
 }

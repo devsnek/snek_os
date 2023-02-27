@@ -23,17 +23,6 @@ pub fn start() {
         }
     });
 
-    executor::spawn(async {
-        use crate::drivers::i8042::MouseStream;
-        use futures_util::StreamExt;
-
-        let mut states = MouseStream::new();
-
-        while let Some(state) = states.next().await {
-            println!("{state:?}");
-        }
-    });
-
     println!("[TASK] running");
     executor.run();
 }

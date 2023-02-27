@@ -44,7 +44,7 @@ impl Runtime {
         let next = self.initialized.fetch_add(1, Ordering::AcqRel);
         assert!(next < MAX_CORES);
         let scheduler = self.cores[next]
-            .try_get_or_init(|| StaticScheduler::new())
+            .try_get_or_init(StaticScheduler::new)
             .unwrap();
         (next, scheduler)
     }
