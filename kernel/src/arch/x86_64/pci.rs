@@ -1,7 +1,9 @@
 use acpi::PciConfigRegions;
 use alloc::collections::BTreeMap;
-use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
-use pci_types::{Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader};
+// use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
+use pci_types::{
+    Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader,
+};
 use x86_64::VirtAddr;
 
 struct Resolver {
@@ -104,10 +106,7 @@ impl Resolver {
                             }
 
                             let bar = endpoint_header.bar(i, self);
-                            skip_next = match bar {
-                                Some(Bar::Memory64 { .. }) => true,
-                                _ => false,
-                            };
+                            skip_next = matches!(bar, Some(Bar::Memory64 { .. }));
                             bars[i as usize] = bar;
                         }
 
@@ -161,6 +160,8 @@ pub struct PciDevice {
 
 impl PciDevice {
     pub fn name(&self) -> String {
+        "Unknown Device".to_owned()
+        /*
         if let Some(device) = DeviceInfo::from_vid_pid(self.vendor_id, self.device_id) {
             format!("{} {}", device.vendor().name(), device.name())
         } else {
@@ -175,6 +176,7 @@ impl PciDevice {
                 .unwrap_or("Unknown Device")
                 .to_owned()
         }
+        */
     }
 }
 

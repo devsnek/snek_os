@@ -40,17 +40,19 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
 
     gdt::init();
 
-    allocator::init(
+    memory::init(
         boot_info.physical_memory_offset.into(),
         &mut boot_info.memory_regions,
     );
 
-    local::init();
+    allocator::init();
 
     let (acpi_platform_info, pci_regions, _implements_8042) =
         acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
 
     interrupts::init(&acpi_platform_info);
+
+    local::init();
 
     pci::init(pci_regions, boot_info.physical_memory_offset.into());
 

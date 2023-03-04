@@ -15,9 +15,12 @@ lazy_static! {
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
-pub unsafe fn init(physical_memory_offset: u64, memory_regions: &'static mut MemoryRegions) {
-    let level_4_table = active_level_4_table(physical_memory_offset);
-    let table = OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset));
+pub fn init(physical_memory_offset: Option<u64>, memory_regions: &'static mut MemoryRegions) {
+    let physical_memory_offset = physical_memory_offset.unwrap_or(0);
+
+    let level_4_table = unsafe { active_level_4_table(physical_memory_offset) };
+    let table =
+        unsafe { OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset)) };
 
     let _ = MAPPER.lock().insert(table);
 

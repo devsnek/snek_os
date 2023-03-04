@@ -42,8 +42,9 @@ impl BlockAllocator {
     /// This function is unsafe because the caller must guarantee that the given
     /// heap bounds are valid and that the heap is unused. This method must be
     /// called only once.
-    pub unsafe fn init(&mut self, heap_start: usize, heap_size: usize) {
-        self.fallback_allocator.init(heap_start as _, heap_size);
+    pub unsafe fn init(&mut self, heap_start: usize, heap_end: usize) {
+        self.fallback_allocator
+            .init(heap_start as _, heap_end - heap_start);
     }
 
     /// Allocates using the fallback allocator.

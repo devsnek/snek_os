@@ -28,7 +28,7 @@ pub fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
         display.buffer = buffer;
         display.clear();
 
-        display.write_rgba(include_bytes!("../../../assets/logo_text.rgba"));
+        display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
     }
 
     println!("[FRAMEBUFFER] initialized");

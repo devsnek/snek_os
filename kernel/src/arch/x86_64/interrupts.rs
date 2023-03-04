@@ -120,21 +120,26 @@ extern "x86-interrupt" fn page_fault_handler(
     prologue!();
 
     let address = Cr2::read();
-    let protv = error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION);
-    let write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
-    let user = error_code.contains(PageFaultErrorCode::USER_MODE);
-    let malformed = error_code.contains(PageFaultErrorCode::MALFORMED_TABLE);
-    let ins = error_code.contains(PageFaultErrorCode::INSTRUCTION_FETCH);
-    panic!(
-        "PAGE FAULT ({}{}{}{}{}at 0x{:x?})\n{:#?}",
-        if protv { "protection-violation " } else { "" },
-        if write { "read-only " } else { "" },
-        if user { "user-mode " } else { "" },
-        if malformed { "reserved " } else { "" },
-        if ins { "fetch " } else { "" },
-        address.as_u64(),
-        stack_frame
-    );
+
+    if !super::allocator::lazy_map(address) {
+        let protv = error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION);
+        let write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
+        let user = error_code.contains(PageFaultErrorCode::USER_MODE);
+        let malformed = error_code.contains(PageFaultErrorCode::MALFORMED_TABLE);
+        let ins = error_code.contains(PageFaultErrorCode::INSTRUCTION_FETCH);
+        panic!(
+            "PAGE FAULT ({}{}{}{}{}at 0x{:x?})\n{:#?}",
+            if protv { "protection-violation " } else { "" },
+            if write { "read-only " } else { "" },
+            if user { "user-mode " } else { "" },
+            if malformed { "reserved " } else { "" },
+            if ins { "fetch " } else { "" },
+            address.as_u64(),
+            stack_frame
+        );
+    }
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn alignment_check_handler(
@@ -277,9 +282,9 @@ fn init_ioapic(apic_info: &ApicInfo) {
     }
 
     unsafe {
-        // ioapic.enable_irq(PS2_MOUSE_IRQ);
+        ioapic.enable_irq(PS2_MOUSE_IRQ);
         ioapic.enable_irq(PIT_TIMER_IRQ);
-        // ioapic.enable_irq(PS2_KEYBOARD_IRQ);
+        ioapic.enable_irq(PS2_KEYBOARD_IRQ);
     }
 
     println!("[IOAPIC] initialized");

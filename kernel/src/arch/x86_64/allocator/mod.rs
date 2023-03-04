@@ -1,55 +1,56 @@
-use x86_64::{
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags},
-    VirtAddr,
-};
-
 mod block_allocator;
 use block_allocator::BlockAllocator;
 
+use x86_64::{
+    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Translate},
+    VirtAddr,
+};
+
 pub const HEAP_START: usize = 0x4444_4444_0000;
-pub const HEAP_SIZE: usize = 16 * 1024 * 1024;
+pub const HEAP_END: usize = 0xFFFF_8000_0000_0000;
 
 #[global_allocator]
-static ALLOCATOR: Locked<BlockAllocator> = Locked::new(BlockAllocator::new());
+pub static ALLOCATOR: Locked<BlockAllocator> = Locked::new(BlockAllocator::new());
 
-pub fn init(
-    physical_memory_offset: Option<u64>,
-    memory_regions: &'static mut bootloader_api::info::MemoryRegions,
-) {
-    println!("[ALLOCATOR] initializing");
-
-    unsafe {
-        super::memory::init(physical_memory_offset.unwrap_or(0), memory_regions);
+pub fn lazy_map(address: VirtAddr) -> bool {
+    if address.as_u64() < HEAP_START as u64 || address.as_u64() >= HEAP_END as u64 {
+        return false;
     }
-
-    let page_range = {
-        let heap_start = VirtAddr::new(HEAP_START as u64);
-        let heap_end = heap_start + HEAP_SIZE - 1u64;
-        let heap_start_page = Page::containing_address(heap_start);
-        let heap_end_page = Page::containing_address(heap_end);
-        Page::range_inclusive(heap_start_page, heap_end_page)
-    };
 
     let mut binding = super::memory::MAPPER.lock();
     let mapper = binding.as_mut().unwrap();
-    let mut binding = super::memory::FRAME_ALLOCATOR.lock();
-    let frame_allocator = binding.as_mut().unwrap();
-    for page in page_range {
-        let frame = frame_allocator.allocate_frame().unwrap();
-        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
-        unsafe {
-            mapper
-                .map_to(page, frame, flags, frame_allocator)
-                .unwrap()
-                .flush()
-        };
+
+    if mapper.translate_addr(address).is_some() {
+        return false;
     }
 
-    unsafe { ALLOCATOR.lock().init(HEAP_START, HEAP_SIZE) };
+    let mut binding = super::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = binding.as_mut().unwrap();
+
+    let page = Page::containing_address(address);
+
+    let frame = frame_allocator.allocate_frame().unwrap();
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+    unsafe {
+        mapper
+            .map_to(page, frame, flags, frame_allocator)
+            .unwrap()
+            .flush()
+    };
+
+    true
+}
+
+pub fn init() {
+    // manually map a page since interrupts may not be enabled yet
+    assert!(lazy_map(VirtAddr::new(HEAP_START as u64)));
+
+    unsafe { ALLOCATOR.lock().init(HEAP_START, HEAP_END) };
 
     println!("[ALLOCATOR] initialized");
 }
 
+// wrapper for GlobalAlloc
 pub struct Locked<T> {
     inner: spin::Mutex<T>,
 }
