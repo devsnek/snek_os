@@ -31,15 +31,9 @@ use prelude::*;
 mod debug;
 mod arch;
 mod drivers;
+mod panic;
 mod task;
 mod util;
-
-#[panic_handler]
-fn panic(info: &core::panic::PanicInfo) -> ! {
-    println!("panic: {}", info);
-
-    arch::halt_loop();
-}
 
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {

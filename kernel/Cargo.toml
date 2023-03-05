@@ -20,15 +20,17 @@ rand = { version = "0.8", default-features = false }
 i8042 = { path = "../crates/i8042" }
 # pci-ids = "0.2"
 pci_types = "0.3"
+rustc-demangle = "0.1"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
-bootloader_api = { git = "https://github.com/rust-osdev/bootloader" }
+bootloader_api = { git = "https://github.com/devsnek/bootloader.git", rev = "78fb1e58cb9e06548de20abeabfd11ebd75f2865" }
 pic8259 = "0.10"
 acpi = "4.1"
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"
+elf = { version = "0.7", default-features = false }
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

@@ -8,9 +8,11 @@ mod local;
 mod memory;
 mod pci;
 mod pit;
+mod stack_trace;
+mod syscall;
 
 use bootloader_api::{BootInfo, BootloaderConfig};
-use x86_64::PhysAddr;
+use x86_64::{PhysAddr, VirtAddr};
 
 const CONFIG: BootloaderConfig = {
     use bootloader_api::config::*;
@@ -45,12 +47,25 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
         &mut boot_info.memory_regions,
     );
 
+    stack_trace::init(
+        unsafe {
+            let virt_addr = VirtAddr::new(
+                boot_info.kernel_addr + Option::from(boot_info.physical_memory_offset).unwrap_or(0),
+            )
+            .as_u64();
+            core::slice::from_raw_parts(virt_addr as _, boot_info.kernel_len as _)
+        },
+        boot_info.kernel_image_offset as _,
+    );
+
     allocator::init();
 
     let (acpi_platform_info, pci_regions, _implements_8042) =
         acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
 
     interrupts::init(&acpi_platform_info);
+
+    syscall::init();
 
     local::init();
 
@@ -63,6 +78,7 @@ bootloader_api::entry_point!(kernel_start, config = &CONFIG);
 
 pub use framebuffer::_print;
 pub use local::Local;
+pub use stack_trace::stack_trace;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {
