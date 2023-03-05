@@ -98,11 +98,9 @@ fn get_signed_9(overflow: bool, sign: bool, val: u8) -> i16 {
         } else {
             val as i16 - 0x100
         }
+    } else if overflow {
+        256
     } else {
-        if overflow {
-            256
-        } else {
-            val as i16
-        }
+        val as i16
     }
 }

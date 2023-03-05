@@ -1,7 +1,7 @@
 pub mod executor;
 pub mod timer;
 
-pub use executor::{spawn, spawn_blocking};
+pub use executor::{spawn, block_on};
 
 pub fn start() {
     let mut executor = executor::Executor::new();

@@ -33,7 +33,6 @@ mod arch;
 mod drivers;
 mod panic;
 mod task;
-mod util;
 
 #[alloc_error_handler]
 fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {

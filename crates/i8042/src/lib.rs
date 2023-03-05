@@ -339,7 +339,6 @@ impl Port {
                         (None, Some(PortState::Unknown))
                     }
                 }
-
                 EnumWaitState::IdentAck => {
                     if data == 0xFA {
                         (None, Some(PortState::Enumerating(EnumWaitState::IdentB1)))
@@ -373,11 +372,11 @@ impl Port {
             },
             PortState::Keyboard(ref mut keyboard) => {
                 let (data, key) = keyboard.handle_data(data);
-                return (data, key.map(|key| Change::Keyboard(key)));
+                return (data, key.map(Change::Keyboard));
             }
             PortState::Mouse(ref mut mouse) => {
                 let state = mouse.handle_data(data);
-                return (None, state.map(|state| Change::Mouse(state)));
+                return (None, state.map(Change::Mouse));
             }
         };
 

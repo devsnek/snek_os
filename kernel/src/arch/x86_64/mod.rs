@@ -9,7 +9,6 @@ mod memory;
 mod pci;
 mod pit;
 mod stack_trace;
-mod syscall;
 
 use bootloader_api::{BootInfo, BootloaderConfig};
 use x86_64::{PhysAddr, VirtAddr};
@@ -65,8 +64,6 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
 
     interrupts::init(&acpi_platform_info);
 
-    syscall::init();
-
     local::init();
 
     pci::init(pci_regions, boot_info.physical_memory_offset.into());
@@ -92,10 +89,4 @@ pub fn enable_interrupts_and_halt() {
     x86_64::instructions::interrupts::enable_and_hlt();
 }
 
-#[inline(always)]
-pub fn without_interrupts<F, R>(f: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    x86_64::instructions::interrupts::without_interrupts(f)
-}
+pub use x86_64::instructions::interrupts::without_interrupts;

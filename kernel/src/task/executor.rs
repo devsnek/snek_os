@@ -184,7 +184,7 @@ where
     })
 }
 
-pub fn spawn_blocking<F>(future: F) -> F::Output
+pub fn block_on<F>(future: F) -> F::Output
 where
     F: Future + Send,
     F::Output: Send,

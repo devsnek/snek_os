@@ -3,13 +3,6 @@ use elf::{endian::AnyEndian, ElfBytes};
 static mut KERNEL_SLICE: &[u8] = &[];
 static mut KERNEL_IMAGE_OFFSET: usize = 0;
 
-#[derive(Debug)]
-#[repr(C)]
-struct RawStackFrame {
-    rbp: *mut StackFrame,
-    rip: usize,
-}
-
 pub fn init(kernel_slice: &'static [u8], kernel_offset: usize) {
     unsafe {
         KERNEL_SLICE = kernel_slice;
@@ -27,7 +20,14 @@ pub fn stack_trace<F>(limit: usize, mut f: F)
 where
     F: FnMut(StackFrame) -> (),
 {
-    let mut frame: *mut RawStackFrame;
+    #[derive(Debug)]
+    #[repr(C)]
+    struct RawStackFrame {
+        rbp: *const RawStackFrame,
+        rip: *const (),
+    }
+
+    let mut frame: *const RawStackFrame;
     unsafe {
         asm!("mov {}, rbp", out(reg) frame);
     }
@@ -59,12 +59,16 @@ where
         }
 
         let address = unsafe { (*frame).rip };
+        if address.is_null() {
+            break;
+        }
+        let address = address as usize;
 
         let function = get_symbol(address);
         f(StackFrame { address, function });
 
         unsafe {
-            frame = (*frame).rbp as _;
+            frame = (*frame).rbp;
         }
     }
 }
