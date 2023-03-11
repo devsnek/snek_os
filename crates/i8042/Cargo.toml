@@ -3,6 +3,9 @@ name = "i8042"
 version = "0.1.0"
 authors = ["snek"]
 edition = "2021"
+description = "Driver for the 8042 PS/2 Controller"
+license-file = "../../LICENSE"
+repository = "https://github.com/devsnek/snek_os"
 
 [dependencies]
 pc-keyboard = "0.7"
