@@ -7,6 +7,10 @@
 #![feature(const_mut_refs)]
 #![feature(never_type)]
 #![feature(asm_const)]
+#![feature(allocator_api)]
+#![feature(ptr_metadata)]
+#![feature(slice_ptr_get)]
+#![feature(inline_const)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -34,19 +38,12 @@ mod drivers;
 mod panic;
 mod task;
 
-#[alloc_error_handler]
-fn alloc_error_handler(layout: alloc::alloc::Layout) -> ! {
-    panic!("allocation error: {:?}", layout);
-}
-
 pub fn main() -> ! {
-    println!("Welcome to SNEK OS");
+    println!("Welcome to snek_os");
 
     drivers::init();
 
     task::start();
-
-    println!("tasks finished?");
 
     arch::halt_loop();
 }

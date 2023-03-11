@@ -8,6 +8,7 @@ mod local;
 mod memory;
 mod pci;
 mod pit;
+mod stack_allocator;
 mod stack_trace;
 
 use bootloader_api::{BootInfo, BootloaderConfig};
@@ -57,16 +58,21 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
         boot_info.kernel_image_offset as _,
     );
 
-    allocator::init();
+    {
+        let acpi_allocator = stack_allocator::StackAllocator::<256>::new();
+        let (acpi_platform_info, pci_regions) = acpi::init(
+            &acpi_allocator,
+            PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()),
+        );
 
-    let (acpi_platform_info, pci_regions, _implements_8042) =
-        acpi::init(PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()));
+        interrupts::init(&acpi_platform_info);
 
-    interrupts::init(&acpi_platform_info);
+        allocator::init();
+
+        pci::init(pci_regions, boot_info.physical_memory_offset.into());
+    }
 
     local::init();
-
-    pci::init(pci_regions, boot_info.physical_memory_offset.into());
 
     crate::main();
 }

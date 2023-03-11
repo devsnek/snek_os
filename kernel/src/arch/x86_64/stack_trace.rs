@@ -18,7 +18,7 @@ pub struct StackFrame {
 
 pub fn stack_trace<F>(limit: usize, mut f: F)
 where
-    F: FnMut(StackFrame) -> (),
+    F: FnMut(StackFrame),
 {
     #[derive(Debug)]
     #[repr(C)]

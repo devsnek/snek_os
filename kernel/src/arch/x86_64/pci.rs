@@ -1,18 +1,19 @@
 use acpi::PciConfigRegions;
 use alloc::collections::BTreeMap;
-// use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
+use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
+use super::acpi::AcpiAllocator;
 use pci_types::{
     Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader,
 };
 use x86_64::VirtAddr;
 
-struct Resolver {
-    regions: PciConfigRegions,
+struct Resolver<'a> {
+    regions: PciConfigRegions<'a, AcpiAllocator>,
     offset: u64,
     devices: BTreeMap<PciAddress, PciDevice>,
 }
 
-impl ConfigRegionAccess for Resolver {
+impl<'a> ConfigRegionAccess for Resolver<'a> {
     fn function_exists(&self, address: PciAddress) -> bool {
         self.regions
             .physical_address(
@@ -53,7 +54,7 @@ impl ConfigRegionAccess for Resolver {
     }
 }
 
-impl Resolver {
+impl<'a> Resolver<'a> {
     fn resolve(mut self) -> BTreeMap<PciAddress, PciDevice> {
         if PciHeader::new(PciAddress::new(0, 0, 0, 0)).has_multiple_functions(&self) {
             for i in 0..8 {
@@ -160,8 +161,6 @@ pub struct PciDevice {
 
 impl PciDevice {
     pub fn name(&self) -> String {
-        "Unknown Device".to_owned()
-        /*
         if let Some(device) = DeviceInfo::from_vid_pid(self.vendor_id, self.device_id) {
             format!("{} {}", device.vendor().name(), device.name())
         } else {
@@ -176,11 +175,10 @@ impl PciDevice {
                 .unwrap_or("Unknown Device")
                 .to_owned()
         }
-        */
     }
 }
 
-pub fn init(regions: PciConfigRegions, physical_offset: Option<u64>) {
+pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: Option<u64>) {
     let resolver = Resolver {
         offset: physical_offset.unwrap_or(0),
         regions,

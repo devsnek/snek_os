@@ -1,13 +1,11 @@
 [package]
 name = "snek_kernel"
 version = "0.1.0"
-authors = ["Gus Caplan <me@gus.host>"]
 edition = "2021"
 
 [dependencies]
 spin = "0.9"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
-linked_list_allocator = "0.10"
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -18,15 +16,16 @@ maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "09c84f4e8171f6
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false }
 i8042 = { path = "../crates/i8042" }
-# pci-ids = "0.2"
+pci-ids = "0.2"
 pci_types = "0.3"
 rustc-demangle = "0.1"
+snalloc = { path = "../crates/snalloc" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
 bootloader_api = { git = "https://github.com/devsnek/bootloader.git", rev = "78fb1e58cb9e06548de20abeabfd11ebd75f2865" }
 pic8259 = "0.10"
-acpi = "4.1"
+acpi = { git = "https://github.com/rust-osdev/acpi.git", rev = "e41036d3749a5a901e62cdf62011c735bf283e9c" }
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"

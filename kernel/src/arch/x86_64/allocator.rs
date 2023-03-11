@@ -1,16 +1,20 @@
-mod block_allocator;
-use block_allocator::BlockAllocator;
-
+use snalloc::Allocator;
 use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Translate},
     VirtAddr,
 };
 
-pub const HEAP_START: usize = 0x4444_4444_0000;
-pub const HEAP_END: usize = 0xFFFF_8000_0000_0000;
+pub const HEAP_START: usize = 0x4000_0000_0000;
+pub const HEAP_END: usize = 0x8000_0000_0000;
 
 #[global_allocator]
-pub static ALLOCATOR: Locked<BlockAllocator> = Locked::new(BlockAllocator::new());
+pub static ALLOCATOR: Allocator = Allocator::new();
+
+pub fn init() {
+    ALLOCATOR.init(HEAP_START, HEAP_END - HEAP_START);
+
+    println!("[ALLOCATOR] initialized");
+}
 
 pub fn lazy_map(address: VirtAddr) -> bool {
     if address.as_u64() < HEAP_START as u64 || address.as_u64() >= HEAP_END as u64 {
@@ -38,31 +42,10 @@ pub fn lazy_map(address: VirtAddr) -> bool {
             .flush()
     };
 
+    unsafe {
+        core::slice::from_raw_parts_mut(page.start_address().as_u64() as *mut u8, page.size() as _)
+            .fill(0);
+    }
+
     true
-}
-
-pub fn init() {
-    // manually map a page since interrupts may not be enabled yet
-    assert!(lazy_map(VirtAddr::new(HEAP_START as u64)));
-
-    unsafe { ALLOCATOR.lock().init(HEAP_START, HEAP_END) };
-
-    println!("[ALLOCATOR] initialized");
-}
-
-// wrapper for GlobalAlloc
-pub struct Locked<T> {
-    inner: spin::Mutex<T>,
-}
-
-impl<T> Locked<T> {
-    pub const fn new(inner: T) -> Self {
-        Locked {
-            inner: spin::Mutex::new(inner),
-        }
-    }
-
-    pub fn lock(&self) -> spin::MutexGuard<T> {
-        self.inner.lock()
-    }
 }

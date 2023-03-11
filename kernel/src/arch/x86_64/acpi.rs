@@ -1,8 +1,29 @@
+use super::stack_allocator::StackAllocator;
 use acpi::{
-    fadt::Fadt, mcfg::PciConfigRegions, platform::PlatformInfo, sdt::Signature, AcpiHandler,
-    AcpiTables, PhysicalMapping,
+    mcfg::PciConfigRegions, platform::PlatformInfo, AcpiHandler, AcpiTables, PhysicalMapping,
 };
 use x86_64::{PhysAddr, VirtAddr};
+
+pub type AcpiAllocator = StackAllocator<256>;
+
+pub fn init(
+    allocator: &AcpiAllocator,
+    rsdp_address: PhysAddr,
+) -> (
+    PlatformInfo<'_, AcpiAllocator>,
+    PciConfigRegions<'_, AcpiAllocator>,
+) {
+    let acpi_tables = allocator.own(
+        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _) }.unwrap(),
+    );
+
+    let pci_regions = PciConfigRegions::new_in(acpi_tables, allocator).unwrap();
+
+    (
+        acpi_tables.platform_info_in(allocator).unwrap(),
+        pci_regions,
+    )
+}
 
 #[derive(Clone)]
 struct AcpiHandlerImpl;
@@ -39,38 +60,18 @@ impl AcpiHandler for AcpiHandlerImpl {
         let num_pages =
             Bytes::new((end_frame_addr - start_frame_addr) as usize).as_num_of_pages::<Size4KiB>();
 
-        let mut binding1 = super::memory::MAPPER.lock();
-        let mapper = binding1.as_mut().unwrap();
+        let mut mapper = super::memory::MAPPER.lock();
+        let mapper = mapper.as_mut().unwrap();
+        let mut allocator = super::memory::FRAME_ALLOCATOR.lock();
+        let allocator = allocator.as_mut().unwrap();
 
         for i in 0..num_pages.as_usize() {
             let page =
                 Page::<Size4KiB>::containing_address(start_frame_addr + Size4KiB::SIZE * i as u64);
 
-            let (_frame, flusher) = mapper.unmap(page).unwrap();
+            let (frame, flusher) = mapper.unmap(page).unwrap();
+            allocator.deallocate_frame(frame);
             flusher.flush();
         }
     }
-}
-
-pub fn init(rsdp_address: PhysAddr) -> (PlatformInfo, PciConfigRegions, bool) {
-    let acpi_tables =
-        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _) }.unwrap();
-
-    let pci_regions = PciConfigRegions::new(&acpi_tables).unwrap();
-
-    let fadt = unsafe {
-        acpi_tables
-            .get_sdt::<Fadt>(Signature::FADT)
-            .unwrap()
-            .unwrap()
-    };
-
-    let implements_8042 =
-        ::core::clone::Clone::clone(&{ fadt.iapc_boot_arch }).motherboard_implements_8042();
-
-    (
-        acpi_tables.platform_info().unwrap(),
-        pci_regions,
-        implements_8042,
-    )
 }

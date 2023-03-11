@@ -108,7 +108,8 @@ impl<T: Impl> Driver8042<T> {
 
     /// Initialize the driver.
     ///
-    /// SAFETY: You must ensure that your system has an 8042 controller. One possible way of doing
+    /// # Safety
+    /// You must ensure that your system has an 8042 controller. One possible way of doing
     /// this is to check the presence via ACPI tables.
     pub unsafe fn init(&mut self) -> Result<(), Error> {
         // Disable controller

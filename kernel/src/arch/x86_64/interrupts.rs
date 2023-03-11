@@ -1,4 +1,4 @@
-use super::gdt;
+use super::{acpi::AcpiAllocator, gdt};
 use acpi::{platform::interrupt::Apic as ApicInfo, InterruptModel, PlatformInfo};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
@@ -232,7 +232,7 @@ unsafe fn end_of_interrupt() {
     LAPIC.lock().as_mut().unwrap().end_of_interrupt();
 }
 
-fn init_lapic(apic_info: &ApicInfo) {
+fn init_lapic(apic_info: &ApicInfo<AcpiAllocator>) {
     unsafe {
         // Disable PIC so it doesn't interfere with LAPIC/IOPICs
         let mut pics = ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET);
@@ -260,7 +260,7 @@ fn init_lapic(apic_info: &ApicInfo) {
     println!("[LAPIC] initialized");
 }
 
-fn init_ioapic(apic_info: &ApicInfo) {
+fn init_ioapic(apic_info: &ApicInfo<AcpiAllocator>) {
     let io_apic_virtual_address =
         super::memory::map_address(PhysAddr::new(apic_info.io_apics[0].address as u64), 4096);
 
@@ -356,7 +356,7 @@ fn init_timing() {
     println!("[TIMING] initialized");
 }
 
-pub fn init(acpi_platform_info: &PlatformInfo) {
+pub fn init(acpi_platform_info: &PlatformInfo<AcpiAllocator>) {
     IDT.load();
 
     let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else { panic!("unsupported interrupt model") };

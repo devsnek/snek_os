@@ -1,4 +1,5 @@
-use bootloader_api::info::{MemoryRegion, MemoryRegionKind, MemoryRegions};
+use super::stack_allocator::StackAllocator;
+use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
 use spin::Mutex;
 use x86_64::{
     structures::paging::{
@@ -12,6 +13,7 @@ use os_units::{Bytes, NumOfPages};
 
 lazy_static! {
     pub static ref MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
+    pub static ref FRAME_ALLOCATOR_ALLOCATOR: StackAllocator::<128> = StackAllocator::new();
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
@@ -44,37 +46,32 @@ unsafe fn active_level_4_table(physical_memory_offset: u64) -> &'static mut Page
 }
 
 pub struct BootInfoFrameAllocator {
-    memory_regions: &'static mut [MemoryRegion],
-    next: usize,
+    iter: Box<dyn core::iter::Iterator<Item = PhysFrame>, &'static StackAllocator<128>>,
 }
+unsafe impl Send for BootInfoFrameAllocator {}
 
 impl BootInfoFrameAllocator {
     pub unsafe fn init(memory_regions: &'static mut MemoryRegions) -> Self {
-        BootInfoFrameAllocator {
-            memory_regions,
-            next: 0,
-        }
+        let iter = Box::new_in(
+            memory_regions
+                .iter()
+                .filter(|r| r.kind == MemoryRegionKind::Usable)
+                .map(|r| r.start..r.end)
+                .flat_map(|r| r.step_by(4096))
+                .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr))),
+            &*FRAME_ALLOCATOR_ALLOCATOR,
+        );
+
+        BootInfoFrameAllocator { iter }
     }
 
-    fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> + '_ {
-        let usable_regions = self
-            .memory_regions
-            .iter()
-            .filter(|r| r.kind == MemoryRegionKind::Usable);
-        // map each region to its address range
-        let addr_ranges = usable_regions.map(|r| r.start..r.end);
-        // transform to an iterator of frame start addresses
-        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
-        // create `PhysFrame` types from the start addresses
-        frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
+    pub fn deallocate_frame(&mut self, _frame: PhysFrame) {
     }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let frame = self.usable_frames().nth(self.next);
-        self.next += 1;
-        frame
+        self.iter.next()
     }
 }
 

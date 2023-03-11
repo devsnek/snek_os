@@ -1,8 +1,8 @@
 [package]
-name = "i8042"
+name = "snalloc"
 version = "0.1.0"
 authors = ["snek"]
 edition = "2021"
 
 [dependencies]
-pc-keyboard = "0.7"
+spin = "0.9"

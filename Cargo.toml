@@ -5,7 +5,6 @@ edition = "2021"
 
 [build-dependencies]
 bootloader = { git = "https://github.com/devsnek/bootloader.git", rev = "78fb1e58cb9e06548de20abeabfd11ebd75f2865" }
-snek_kernel = { path = "kernel", artifact = "bin", target = "x86_64-unknown-none" }
 
 [dependencies]
 ovmf-prebuilt = "0.1.0-alpha.1"
@@ -13,5 +12,6 @@ ovmf-prebuilt = "0.1.0-alpha.1"
 [workspace]
 members = [
   "kernel",
-  "crates/i8042"
+  "crates/i8042",
+  "crates/snalloc",
 ]
