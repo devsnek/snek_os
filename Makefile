@@ -17,6 +17,12 @@ KERNEL: FORCE
 
 FORCE: ;
 
-.PHONY: clean
+.PHONY: clean format
 clean:
 	cargo clean
+
+format:
+	cargo fmt
+
+clippy:
+	cargo clippy --package snek_kernel --target x86_64-unknown-none

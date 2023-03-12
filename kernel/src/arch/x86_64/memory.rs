@@ -13,7 +13,7 @@ use os_units::{Bytes, NumOfPages};
 
 lazy_static! {
     pub static ref MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
-    pub static ref FRAME_ALLOCATOR_ALLOCATOR: StackAllocator::<128> = StackAllocator::new();
+    pub static ref FRAME_ALLOCATOR_ALLOCATOR: StackAllocator::<2048> = StackAllocator::new();
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
@@ -46,7 +46,8 @@ unsafe fn active_level_4_table(physical_memory_offset: u64) -> &'static mut Page
 }
 
 pub struct BootInfoFrameAllocator {
-    iter: Box<dyn core::iter::Iterator<Item = PhysFrame>, &'static StackAllocator<128>>,
+    iter: Box<dyn core::iter::Iterator<Item = PhysFrame>, &'static StackAllocator<2048>>,
+    free_frames: *mut FreePhysFrame,
 }
 unsafe impl Send for BootInfoFrameAllocator {}
 
@@ -62,17 +63,35 @@ impl BootInfoFrameAllocator {
             &*FRAME_ALLOCATOR_ALLOCATOR,
         );
 
-        BootInfoFrameAllocator { iter }
+        BootInfoFrameAllocator {
+            iter,
+            free_frames: core::ptr::null_mut(),
+        }
     }
 
-    pub fn deallocate_frame(&mut self, _frame: PhysFrame) {
+    pub fn deallocate_frame(&mut self, frame: PhysFrame) {
+        let next = self.free_frames;
+        let free_frame = FRAME_ALLOCATOR_ALLOCATOR.own(FreePhysFrame { frame, next });
+        self.free_frames = free_frame;
     }
 }
 
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
+        if !self.free_frames.is_null() {
+            unsafe {
+                let frame = (*self.free_frames).frame;
+                self.free_frames = (*self.free_frames).next;
+                return Some(frame);
+            }
+        }
         self.iter.next()
     }
+}
+
+struct FreePhysFrame {
+    frame: PhysFrame,
+    next: *mut FreePhysFrame,
 }
 
 fn search_free_addr_from(num_pages: NumOfPages<Size4KiB>, region: PageRange) -> Option<VirtAddr> {

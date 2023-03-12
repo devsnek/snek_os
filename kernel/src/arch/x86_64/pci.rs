@@ -1,7 +1,7 @@
+use super::acpi::AcpiAllocator;
 use acpi::PciConfigRegions;
 use alloc::collections::BTreeMap;
 use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
-use super::acpi::AcpiAllocator;
 use pci_types::{
     Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader,
 };
