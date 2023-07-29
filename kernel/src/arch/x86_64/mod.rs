@@ -81,6 +81,7 @@ bootloader_api::entry_point!(kernel_start, config = &CONFIG);
 
 pub use framebuffer::_print;
 pub use local::Local;
+pub use pci::get_devices as get_pci_devices;
 pub use stack_trace::stack_trace;
 
 #[inline(always)]

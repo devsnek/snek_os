@@ -17,7 +17,7 @@ lazy_static! {
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
-pub fn init(physical_memory_offset: Option<u64>, memory_regions: &'static mut MemoryRegions) {
+pub fn init(physical_memory_offset: Option<u64>, memory_regions: &'static MemoryRegions) {
     let physical_memory_offset = physical_memory_offset.unwrap_or(0);
 
     let level_4_table = unsafe { active_level_4_table(physical_memory_offset) };
@@ -52,7 +52,7 @@ pub struct BootInfoFrameAllocator {
 unsafe impl Send for BootInfoFrameAllocator {}
 
 impl BootInfoFrameAllocator {
-    pub unsafe fn init(memory_regions: &'static mut MemoryRegions) -> Self {
+    pub unsafe fn init(memory_regions: &'static MemoryRegions) -> Self {
         let iter = Box::new_in(
             memory_regions
                 .iter()

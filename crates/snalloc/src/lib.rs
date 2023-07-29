@@ -1,47 +1,13 @@
 #![no_std]
 
-macro_rules! println {
-    ($($arg:tt)*) => {{
-        fn write_byte(b: u8) {
-            unsafe {
-                core::arch::asm!(r#"
-                mov al, {}
-                out 0e9h, al
-                "#, in(reg_byte) b);
-            }
-        }
-        match format_args!($($arg)*) {
-            args => {
-                if let Some(s) = args.as_str() {
-                    for b in s.bytes() {
-                        write_byte(b);
-                    }
-                } else {
-                    struct Foo;
-                    impl core::fmt::Write for Foo {
-                        fn write_str(&mut self, s: &str) -> core::fmt::Result {
-                            for b in s.bytes() {
-                                write_byte(b);
-                            }
-                            Ok(())
-                        }
-                    }
-                    core::fmt::write(&mut Foo, args).unwrap();
-                }
-                write_byte(b'\r');
-                write_byte(b'\n');
-            }
-        }
-    }}
-}
-
 extern crate alloc;
 
 use alloc::alloc::{GlobalAlloc, Layout};
+use linked_list_allocator::Heap as LinkedListAllocator;
 use spin::Mutex;
 
 /// A memory allocator which uses a combination of
-/// slab and buddy allocation.
+/// slab allocation and a fallback allocator.
 pub struct Allocator {
     inner: Mutex<Inner>,
 }
@@ -50,7 +16,7 @@ struct Inner {
     start: usize,
     size: usize,
     slabs: [SlabAllocator; 7],
-    buddy: BuddyAllocator,
+    fallback: LinkedListAllocator,
 }
 
 impl Inner {
@@ -75,7 +41,7 @@ impl Allocator {
                     SlabAllocator::new(1024),
                     SlabAllocator::new(2048),
                 ],
-                buddy: BuddyAllocator::new(),
+                fallback: LinkedListAllocator::empty(),
             }),
         }
     }
@@ -90,7 +56,9 @@ impl Allocator {
             slab.init(start, region_size);
         }
         let start = start + (region_size * inner.slabs.len());
-        inner.buddy.init(start, region_size);
+        unsafe {
+            inner.fallback.init(start as _, region_size);
+        }
     }
 }
 
@@ -100,7 +68,10 @@ unsafe impl GlobalAlloc for Allocator {
         if let Some(slab) = inner.slab(layout) {
             slab.alloc(layout)
         } else {
-            inner.buddy.alloc(layout)
+            match inner.fallback.allocate_first_fit(layout).ok() {
+                Some(allocation) => allocation.as_ptr(),
+                None => core::ptr::null_mut(),
+            }
         }
     }
 
@@ -109,7 +80,12 @@ unsafe impl GlobalAlloc for Allocator {
         if let Some(slab) = inner.slab(layout) {
             slab.dealloc(ptr, layout)
         } else {
-            inner.buddy.dealloc(ptr, layout)
+            if ptr.is_null() {
+                return;
+            }
+            inner
+                .fallback
+                .deallocate(core::ptr::NonNull::new_unchecked(ptr), layout)
         }
     }
 }
@@ -118,6 +94,7 @@ struct SlabCell {
     next: usize,
 }
 
+#[derive(Debug)]
 struct SlabAllocator {
     start: usize,
     end: usize,
@@ -169,20 +146,4 @@ impl SlabAllocator {
         (*cell).next = self.next;
         self.next = cell as usize;
     }
-}
-
-struct BuddyAllocator {}
-
-impl BuddyAllocator {
-    const fn new() -> Self {
-        Self {}
-    }
-
-    fn init(&mut self, _start: usize, _size: usize) {}
-
-    unsafe fn alloc(&mut self, _layout: Layout) -> *mut u8 {
-        core::ptr::null_mut()
-    }
-
-    unsafe fn dealloc(&mut self, _ptr: *mut u8, _layout: Layout) {}
 }

@@ -359,7 +359,9 @@ fn init_timing() {
 pub fn init(acpi_platform_info: &PlatformInfo<AcpiAllocator>) {
     IDT.load();
 
-    let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else { panic!("unsupported interrupt model") };
+    let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else {
+        panic!("unsupported interrupt model")
+    };
 
     init_lapic(apic_info);
 

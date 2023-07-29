@@ -30,6 +30,8 @@ fn main() {
 
     cmd.args(["-smp", "2"]);
 
+    cmd.args(["-device", "qemu-xhci"]);
+
     cmd.arg("-no-reboot");
     cmd.arg("-no-shutdown");
 

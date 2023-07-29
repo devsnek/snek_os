@@ -13,20 +13,22 @@ fn panic(info: &PanicInfo) -> ! {
         IN_PANIC = true;
     }
 
-    println!("PANIC: {}", info);
+    crate::arch::without_interrupts(|| -> ! {
+        println!("PANIC: {}", info);
 
-    crate::arch::stack_trace(16, |frame| {
-        if let Some((f_addr, f_name)) = frame.function {
-            println!(
-                "  at 0x{:016x} {:#}+0x{:x}",
-                frame.address,
-                demangle(f_name),
-                frame.address - f_addr
-            );
-        } else {
-            println!("  at 0x{:016x}", frame.address);
-        }
+        crate::arch::stack_trace(16, |frame| {
+            if let Some((f_addr, f_name)) = frame.function {
+                println!(
+                    "  at 0x{:016x} {:#}+0x{:x}",
+                    frame.address,
+                    demangle(f_name),
+                    frame.address - f_addr
+                );
+            } else {
+                println!("  at 0x{:016x}", frame.address);
+            }
+        });
+
+        crate::arch::halt_loop();
     });
-
-    crate::arch::halt_loop();
 }

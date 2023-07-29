@@ -178,6 +178,12 @@ impl PciDevice {
     }
 }
 
+static mut DEVICES: BTreeMap<PciAddress, PciDevice> = BTreeMap::new();
+
+pub fn get_devices() -> &'static BTreeMap<PciAddress, PciDevice> {
+    unsafe { &DEVICES }
+}
+
 pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: Option<u64>) {
     let resolver = Resolver {
         offset: physical_offset.unwrap_or(0),
@@ -185,14 +191,18 @@ pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: Option<u6
         devices: BTreeMap::new(),
     };
 
-    let devices = resolver.resolve();
-    for (address, device) in devices {
+    let mut devices = resolver.resolve();
+    for (address, device) in &devices {
         println!(
-            "PCI {address} {:04x}:{:04x} {}",
+            "  PCI {address} {:04x}:{:04x} {}",
             device.vendor_id,
             device.device_id,
             device.name()
         );
+    }
+
+    unsafe {
+        DEVICES.append(&mut devices);
     }
 
     println!("[PCI] initialized");

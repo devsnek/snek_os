@@ -40,7 +40,9 @@ where
         });
 
     let get_symbol = |addr: usize| -> Option<(usize, &'static str)> {
-        let Some((table, strings)) = &symbols else { return None };
+        let Some((table, strings)) = &symbols else {
+            return None;
+        };
         for symbol in table.iter() {
             let translated_start = symbol.st_value as usize + unsafe { KERNEL_IMAGE_OFFSET };
             let translated_end = translated_start + (symbol.st_size as usize);

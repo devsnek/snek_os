@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [build-dependencies]
-bootloader = { git = "https://github.com/devsnek/bootloader.git", rev = "78fb1e58cb9e06548de20abeabfd11ebd75f2865" }
+bootloader = { git = "https://github.com/devsnek/bootloader.git", rev = "a65533a4deb86afe13f4dcc79209b344fee34f4f" }
 
 [dependencies]
 ovmf-prebuilt = "0.1.0-alpha.1"

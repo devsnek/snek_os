@@ -6,3 +6,5 @@ edition = "2021"
 
 [dependencies]
 spin = "0.9"
+e9 = { path = "../e9" }
+linked_list_allocator = "0.10"

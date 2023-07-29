@@ -6,7 +6,9 @@ fn main() {
 
         println!("cargo:rerun-if-changed=./assets/{file}.png");
         let img = image::open(format!("./assets/{file}.png")).unwrap();
-        let image::DynamicImage::ImageRgba8(img) = img else { panic!() };
+        let image::DynamicImage::ImageRgba8(img) = img else {
+            panic!()
+        };
 
         buf.extend(img.width().to_be_bytes());
         buf.extend(img.height().to_be_bytes());

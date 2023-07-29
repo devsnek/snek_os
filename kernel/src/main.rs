@@ -47,13 +47,3 @@ pub fn main() -> ! {
 
     arch::halt_loop();
 }
-
-pub struct ProcessorInfo {
-    id: u32,
-}
-
-pub fn ap_main(info: ProcessorInfo) -> ! {
-    println!("[SMP] processor {} started", info.id);
-
-    arch::halt_loop();
-}
