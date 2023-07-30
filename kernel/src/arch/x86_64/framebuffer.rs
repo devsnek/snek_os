@@ -3,12 +3,15 @@ use limine::Framebuffer;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
 
+use embedded_graphics::{pixelcolor::Rgb888, prelude::*, primitives::Rectangle};
+
 static mut EMPTY_BUF: [u8; 0] = [];
 
 #[derive(Debug, Clone, Copy)]
 pub enum PixelFormat {
     Rgb,
     Bgr,
+    U8,
     Unknown,
 }
 
@@ -39,8 +42,9 @@ pub fn init(info: &Framebuffer) {
             info.green_mask_shift,
             info.blue_mask_shift,
         ) {
-            (0x00, 0x8, 0x10) => PixelFormat::Rgb,
+            (0x00, 0x08, 0x10) => PixelFormat::Rgb,
             (0x10, 0x08, 0x00) => PixelFormat::Bgr,
+            (0x00, 0x00, 0x00) => PixelFormat::U8,
             _ => PixelFormat::Unknown,
         };
         display.clear();
@@ -143,6 +147,7 @@ impl Display {
             let (r0, g0, b0) = match self.pixel_format {
                 PixelFormat::Rgb => (bytes[0], bytes[1], bytes[2]),
                 PixelFormat::Bgr => (bytes[2], bytes[1], bytes[0]),
+                PixelFormat::U8 => (bytes[0], bytes[0], bytes[0]),
                 other => {
                     self.pixel_format = PixelFormat::Rgb;
                     panic!("pixel format {:?} not supported in logger", other)
@@ -164,12 +169,10 @@ impl Display {
         let color = match self.pixel_format {
             PixelFormat::Rgb => [r, g, b, 0],
             PixelFormat::Bgr => [b, g, r, 0],
-            /*
             PixelFormat::U8 => {
                 let lum = 0.2126 * (r as f64) + 0.7125 * (g as f64) + 0.722 * (b as f64);
                 [if lum > 200.0 { 0xf } else { 0 }, 0, 0, 0]
             }
-            */
             other => {
                 self.pixel_format = PixelFormat::Rgb;
                 panic!("pixel format {:?} not supported in logger", other)
@@ -178,7 +181,6 @@ impl Display {
 
         self.buffer[byte_offset..(byte_offset + bytes_per_pixel)]
             .copy_from_slice(&color[..bytes_per_pixel]);
-        let _ = unsafe { core::ptr::read_volatile(&self.buffer[byte_offset]) };
     }
 
     fn write_char(&mut self, c: char) {
@@ -235,6 +237,40 @@ impl Write for Display {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
         for c in s.chars() {
             self.write_char(c);
+        }
+        Ok(())
+    }
+}
+
+impl Dimensions for Display {
+    fn bounding_box(&self) -> Rectangle {
+        Rectangle {
+            top_left: Point { x: 0, y: 0 },
+            size: Size {
+                width: self.width as _,
+                height: self.height as _,
+            },
+        }
+    }
+}
+
+impl DrawTarget for Display {
+    type Color = Rgb888;
+    type Error = ();
+
+    fn draw_iter<I>(&mut self, pixels: I) -> Result<(), Self::Error>
+    where
+        I: IntoIterator<Item = Pixel<Self::Color>>,
+    {
+        for pixel in pixels {
+            self.write_pixel(
+                pixel.0.x as _,
+                pixel.0.y as _,
+                pixel.1.r(),
+                pixel.1.g(),
+                pixel.1.b(),
+                255,
+            );
         }
         Ok(())
     }

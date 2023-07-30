@@ -11,8 +11,8 @@ mod stack_allocator;
 mod stack_trace;
 
 use limine::{
-    FramebufferRequest, HhdmRequest, KernelFileRequest, MemmapRequest, RsdpRequest, SmpInfo,
-    SmpRequest,
+    FramebufferRequest, HhdmRequest, KernelAddressRequest, KernelFileRequest, MemmapRequest,
+    RsdpRequest, SmpInfo, SmpRequest,
 };
 use x86_64::VirtAddr;
 
@@ -20,6 +20,7 @@ static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 static HHDM: HhdmRequest = HhdmRequest::new(0);
 static MEMMAP: MemmapRequest = MemmapRequest::new(0);
 static KERNEL_FILE: KernelFileRequest = KernelFileRequest::new(0);
+static KERNEL_ADDRESS: KernelAddressRequest = KernelAddressRequest::new(0);
 static RSDP: RsdpRequest = RsdpRequest::new(0);
 static SMP: SmpRequest = SmpRequest::new(0);
 
@@ -49,10 +50,14 @@ unsafe extern "C" fn _start() -> ! {
         .get()
         .unwrap();
 
-    stack_trace::init(unsafe {
-        let kernel_file_base = kernel_file.base.as_ptr().unwrap();
-        core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _)
-    });
+    let kernel_address = KERNEL_ADDRESS.get_response().get().unwrap();
+
+    let kernel_file_base = kernel_file.base.as_ptr().unwrap();
+
+    stack_trace::init(
+        unsafe { core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _) },
+        VirtAddr::new(kernel_address.virtual_base),
+    );
 
     {
         let acpi_allocator = stack_allocator::StackAllocator::<256>::new();
@@ -106,4 +111,5 @@ pub fn enable_interrupts_and_halt() {
     x86_64::instructions::interrupts::enable_and_hlt();
 }
 
+pub use x86_64::instructions::interrupts::disable as disable_interrupts;
 pub use x86_64::instructions::interrupts::without_interrupts;
