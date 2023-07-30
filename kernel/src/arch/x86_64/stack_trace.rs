@@ -1,12 +1,10 @@
 use elf::{endian::AnyEndian, ElfBytes};
 
 static mut KERNEL_SLICE: &[u8] = &[];
-static mut KERNEL_IMAGE_OFFSET: usize = 0;
 
-pub fn init(kernel_slice: &'static [u8], kernel_offset: usize) {
+pub fn init(kernel_slice: &'static [u8]) {
     unsafe {
         KERNEL_SLICE = kernel_slice;
-        KERNEL_IMAGE_OFFSET = kernel_offset;
     }
 }
 
@@ -44,7 +42,7 @@ where
             return None;
         };
         for symbol in table.iter() {
-            let translated_start = symbol.st_value as usize + unsafe { KERNEL_IMAGE_OFFSET };
+            let translated_start = symbol.st_value as usize;
             let translated_end = translated_start + (symbol.st_size as usize);
             if addr >= translated_start && addr < translated_end {
                 if let Ok(r) = strings.get(symbol.st_name as _) {

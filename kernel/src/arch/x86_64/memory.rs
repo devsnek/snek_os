@@ -1,5 +1,5 @@
 use super::stack_allocator::StackAllocator;
-use bootloader_api::info::{MemoryRegionKind, MemoryRegions};
+use limine::{MemmapEntry, MemoryMapEntryType, NonNullPtr};
 use spin::Mutex;
 use x86_64::{
     structures::paging::{
@@ -17,9 +17,7 @@ lazy_static! {
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
 }
 
-pub fn init(physical_memory_offset: Option<u64>, memory_regions: &'static MemoryRegions) {
-    let physical_memory_offset = physical_memory_offset.unwrap_or(0);
-
+pub fn init(physical_memory_offset: u64, memory_regions: &'static [NonNullPtr<MemmapEntry>]) {
     let level_4_table = unsafe { active_level_4_table(physical_memory_offset) };
     let table =
         unsafe { OffsetPageTable::new(level_4_table, VirtAddr::new(physical_memory_offset)) };
@@ -52,12 +50,13 @@ pub struct BootInfoFrameAllocator {
 unsafe impl Send for BootInfoFrameAllocator {}
 
 impl BootInfoFrameAllocator {
-    pub unsafe fn init(memory_regions: &'static MemoryRegions) -> Self {
+    pub unsafe fn init(memory_regions: &'static [NonNullPtr<MemmapEntry>]) -> Self {
         let iter = Box::new_in(
             memory_regions
                 .iter()
-                .filter(|r| r.kind == MemoryRegionKind::Usable)
-                .map(|r| r.start..r.end)
+                .map(|p| &*p.as_ptr())
+                .filter(|r| r.typ == MemoryMapEntryType::Usable)
+                .map(|r| r.base..(r.base + r.len))
                 .flat_map(|r| r.step_by(4096))
                 .map(|addr| PhysFrame::containing_address(PhysAddr::new(addr))),
             &*FRAME_ALLOCATOR_ALLOCATOR,
@@ -69,6 +68,7 @@ impl BootInfoFrameAllocator {
         }
     }
 
+    #[allow(unused)]
     pub fn deallocate_frame(&mut self, frame: PhysFrame) {
         let next = self.free_frames;
         let free_frame = FRAME_ALLOCATOR_ALLOCATOR.own(FreePhysFrame { frame, next });

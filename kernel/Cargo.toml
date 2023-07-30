@@ -20,10 +20,11 @@ pci-ids = "0.2"
 pci_types = "0.3"
 rustc-demangle = "0.1"
 snalloc = { path = "../crates/snalloc" }
+limine = "0.1"
+e9 = { path = "../crates/e9" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
-bootloader_api = { git = "https://github.com/devsnek/bootloader.git", rev = "a65533a4deb86afe13f4dcc79209b344fee34f4f" }
 pic8259 = "0.10"
 acpi = { git = "https://github.com/rust-osdev/acpi.git", rev = "e41036d3749a5a901e62cdf62011c735bf283e9c" }
 os_units = "0.4"

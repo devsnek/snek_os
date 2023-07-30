@@ -184,9 +184,9 @@ pub fn get_devices() -> &'static BTreeMap<PciAddress, PciDevice> {
     unsafe { &DEVICES }
 }
 
-pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: Option<u64>) {
+pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: u64) {
     let resolver = Resolver {
-        offset: physical_offset.unwrap_or(0),
+        offset: physical_offset,
         regions,
         devices: BTreeMap::new(),
     };

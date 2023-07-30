@@ -43,7 +43,15 @@ pub fn main() -> ! {
 
     drivers::init();
 
+    arch::init_smp();
+
     task::start();
+
+    arch::halt_loop();
+}
+
+pub fn ap_main(ap_id: u8) -> ! {
+    task::ap_start(ap_id);
 
     arch::halt_loop();
 }

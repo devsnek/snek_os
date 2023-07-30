@@ -1,31 +1,48 @@
-use bootloader_api::info::{FrameBufferInfo, PixelFormat};
 use core::fmt::Write;
+use limine::Framebuffer;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
 
 static mut EMPTY_BUF: [u8; 0] = [];
 
+#[derive(Debug, Clone, Copy)]
+pub enum PixelFormat {
+    Rgb,
+    Bgr,
+    Unknown,
+}
+
 lazy_static! {
     pub static ref DISPLAY: Mutex<Display> = Mutex::new(Display {
         buffer: unsafe { &mut EMPTY_BUF },
-        info: FrameBufferInfo {
-            byte_len: 0,
-            width: 0,
-            height: 0,
-            pixel_format: PixelFormat::U8,
-            bytes_per_pixel: 0,
-            stride: 0,
-        },
+        width: 0,
+        height: 0,
+        bytes_per_pixel: 0,
+        pixel_format: PixelFormat::Bgr,
+        stride: 0,
         x_pos: 0,
         y_pos: 0,
     });
 }
 
-pub fn init(info: FrameBufferInfo, buffer: &'static mut [u8]) {
+pub fn init(info: &Framebuffer) {
     {
         let mut display = DISPLAY.lock();
-        display.info = info;
-        display.buffer = buffer;
+        display.buffer =
+            unsafe { core::slice::from_raw_parts_mut(info.address.as_ptr().unwrap(), info.size()) };
+        display.width = info.width as _;
+        display.height = info.height as _;
+        display.bytes_per_pixel = (info.bpp / 8) as _;
+        display.stride = (info.pitch / 4) as _;
+        display.pixel_format = match (
+            info.red_mask_shift,
+            info.green_mask_shift,
+            info.blue_mask_shift,
+        ) {
+            (0x00, 0x8, 0x10) => PixelFormat::Rgb,
+            (0x10, 0x08, 0x00) => PixelFormat::Bgr,
+            _ => PixelFormat::Unknown,
+        };
         display.clear();
 
         display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
@@ -57,7 +74,11 @@ fn get_char_raster(c: char) -> RasterizedChar {
 
 pub struct Display {
     buffer: &'static mut [u8],
-    info: FrameBufferInfo,
+    width: usize,
+    height: usize,
+    stride: usize,
+    bytes_per_pixel: usize,
+    pixel_format: PixelFormat,
     x_pos: usize,
     y_pos: usize,
 }
@@ -69,7 +90,7 @@ impl Display {
         self.y_pos += LINE_HEIGHT;
         self.carriage_return();
 
-        if self.y_pos + LINE_HEIGHT >= self.info.height {
+        if self.y_pos + LINE_HEIGHT >= self.height {
             self.scroll();
             self.y_pos -= LINE_HEIGHT;
         }
@@ -87,12 +108,12 @@ impl Display {
     }
 
     fn scroll(&mut self) {
-        let bytes_per_pixel = self.info.bytes_per_pixel;
+        let bytes_per_pixel = self.bytes_per_pixel;
 
-        let next_line_offset = (self.info.stride * LINE_HEIGHT) * bytes_per_pixel;
+        let next_line_offset = (self.stride * LINE_HEIGHT) * bytes_per_pixel;
 
-        let pixel_height = self.info.height - LINE_HEIGHT;
-        let pixels = self.info.stride * pixel_height;
+        let pixel_height = self.height - LINE_HEIGHT;
+        let pixels = self.stride * pixel_height;
         let bytes = pixels * bytes_per_pixel;
 
         unsafe {
@@ -113,18 +134,17 @@ impl Display {
             return;
         }
 
-        let pixel_offset = y * self.info.stride + x;
-        let bytes_per_pixel = self.info.bytes_per_pixel;
+        let pixel_offset = y * self.stride + x;
+        let bytes_per_pixel = self.bytes_per_pixel;
         let byte_offset = pixel_offset * bytes_per_pixel;
 
         if a != 255 {
             let bytes = &self.buffer[byte_offset..(byte_offset + bytes_per_pixel)];
-            let (r0, g0, b0) = match self.info.pixel_format {
+            let (r0, g0, b0) = match self.pixel_format {
                 PixelFormat::Rgb => (bytes[0], bytes[1], bytes[2]),
                 PixelFormat::Bgr => (bytes[2], bytes[1], bytes[0]),
-                PixelFormat::U8 => (bytes[0], bytes[0], bytes[0]),
                 other => {
-                    self.info.pixel_format = PixelFormat::Rgb;
+                    self.pixel_format = PixelFormat::Rgb;
                     panic!("pixel format {:?} not supported in logger", other)
                 }
             };
@@ -141,21 +161,20 @@ impl Display {
             b = blend(b0, b);
         }
 
-        let color = match self.info.pixel_format {
+        let color = match self.pixel_format {
             PixelFormat::Rgb => [r, g, b, 0],
             PixelFormat::Bgr => [b, g, r, 0],
+            /*
             PixelFormat::U8 => {
                 let lum = 0.2126 * (r as f64) + 0.7125 * (g as f64) + 0.722 * (b as f64);
                 [if lum > 200.0 { 0xf } else { 0 }, 0, 0, 0]
             }
+            */
             other => {
-                self.info.pixel_format = PixelFormat::Rgb;
+                self.pixel_format = PixelFormat::Rgb;
                 panic!("pixel format {:?} not supported in logger", other)
             }
         };
-
-        let bytes_per_pixel = self.info.bytes_per_pixel;
-        let byte_offset = pixel_offset * bytes_per_pixel;
 
         self.buffer[byte_offset..(byte_offset + bytes_per_pixel)]
             .copy_from_slice(&color[..bytes_per_pixel]);
@@ -171,7 +190,7 @@ impl Display {
                 let width = rendered_char.width();
 
                 let new_xpos = self.x_pos + width;
-                if new_xpos >= self.info.width {
+                if new_xpos >= self.width {
                     self.newline();
                 }
 

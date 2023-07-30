@@ -1,7 +1,7 @@
 pub mod executor;
 pub mod timer;
 
-pub use executor::{block_on, spawn};
+pub use executor::spawn;
 
 pub fn start() {
     let mut executor = executor::Executor::new();
@@ -24,5 +24,11 @@ pub fn start() {
     });
 
     println!("[TASK] running");
+    executor.run();
+}
+
+pub fn ap_start(ap_id: u8) {
+    let mut executor = executor::Executor::new();
+    println!("[TASK] added processor {ap_id}");
     executor.run();
 }

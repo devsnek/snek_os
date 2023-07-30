@@ -201,35 +201,3 @@ where
         }
     })
 }
-
-pub fn block_on<F>(future: F) -> F::Output
-where
-    F: Future + Send,
-    F::Output: Send,
-{
-    use alloc::sync::Arc;
-    use futures::task::{waker, ArcWake, Context, Poll};
-
-    futures::pin_mut!(future);
-
-    struct Waker;
-    impl ArcWake for Waker {
-        fn wake_by_ref(_arc_self: &Arc<Self>) {}
-    }
-
-    let waker = waker(Arc::new(Waker));
-    let mut context = Context::from_waker(&waker);
-
-    loop {
-        super::timer::TIMER.advance_ticks(0);
-
-        match Future::poll(future.as_mut(), &mut context) {
-            Poll::Ready(v) => {
-                return v;
-            }
-            Poll::Pending => {}
-        }
-
-        crate::arch::enable_interrupts_and_halt();
-    }
-}

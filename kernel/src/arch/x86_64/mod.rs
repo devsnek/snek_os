@@ -1,6 +1,5 @@
 mod acpi;
 mod allocator;
-mod e9;
 mod framebuffer;
 mod gdt;
 mod interrupts;
@@ -11,65 +10,61 @@ mod pit;
 mod stack_allocator;
 mod stack_trace;
 
-use bootloader_api::{BootInfo, BootloaderConfig};
-use x86_64::{PhysAddr, VirtAddr};
-
-const CONFIG: BootloaderConfig = {
-    use bootloader_api::config::*;
-
-    let mut mappings = Mappings::new_default();
-    mappings.kernel_stack = Mapping::Dynamic;
-    mappings.boot_info = Mapping::Dynamic;
-    mappings.framebuffer = Mapping::Dynamic;
-    mappings.physical_memory = Some(Mapping::Dynamic);
-    mappings.page_table_recursive = None;
-    mappings.aslr = true;
-    mappings.dynamic_range_start = Some(0xFFFF_8000_0000_0000);
-    mappings.dynamic_range_end = Some(0xFFFF_FFFF_FFFF_FFFF);
-
-    let mut config = BootloaderConfig::new_default();
-    config.mappings = mappings;
-    config.kernel_stack_size = 80 * 1024 * 128;
-    config
+use limine::{
+    FramebufferRequest, HhdmRequest, KernelFileRequest, MemmapRequest, RsdpRequest, SmpInfo,
+    SmpRequest,
 };
+use x86_64::VirtAddr;
 
-fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
-    e9::debug("hey there :)");
+static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
+static HHDM: HhdmRequest = HhdmRequest::new(0);
+static MEMMAP: MemmapRequest = MemmapRequest::new(0);
+static KERNEL_FILE: KernelFileRequest = KernelFileRequest::new(0);
+static RSDP: RsdpRequest = RsdpRequest::new(0);
+static SMP: SmpRequest = SmpRequest::new(0);
 
-    if let Some(framebuffer) = boot_info.framebuffer.as_mut() {
-        framebuffer::init(framebuffer.info(), framebuffer.buffer_mut());
+#[no_mangle]
+unsafe extern "C" fn _start() -> ! {
+    e9::println!("hey there :)");
+
+    if let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() {
+        if framebuffer_response.framebuffer_count > 0 {
+            let framebuffer = &framebuffer_response.framebuffers()[0];
+            framebuffer::init(framebuffer);
+        }
     }
 
     gdt::init();
 
-    memory::init(
-        boot_info.physical_memory_offset.into(),
-        &mut boot_info.memory_regions,
-    );
+    let memmap = MEMMAP.get_response().get_mut().unwrap().memmap_mut();
+    let physical_memory_offset = HHDM.get_response().get().unwrap().offset;
 
-    stack_trace::init(
-        unsafe {
-            let virt_addr = VirtAddr::new(
-                boot_info.kernel_addr + Option::from(boot_info.physical_memory_offset).unwrap_or(0),
-            )
-            .as_u64();
-            core::slice::from_raw_parts(virt_addr as _, boot_info.kernel_len as _)
-        },
-        boot_info.kernel_image_offset as _,
-    );
+    memory::init(physical_memory_offset, memmap);
+
+    let kernel_file = KERNEL_FILE
+        .get_response()
+        .get()
+        .unwrap()
+        .kernel_file
+        .get()
+        .unwrap();
+
+    stack_trace::init(unsafe {
+        let kernel_file_base = kernel_file.base.as_ptr().unwrap();
+        core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _)
+    });
 
     {
         let acpi_allocator = stack_allocator::StackAllocator::<256>::new();
-        let (acpi_platform_info, pci_regions) = acpi::init(
-            &acpi_allocator,
-            PhysAddr::new(boot_info.rsdp_addr.into_option().unwrap()),
-        );
+        let rsdp_addr = RSDP.get_response().get().unwrap().address.as_ptr().unwrap() as u64;
+        let (acpi_platform_info, pci_regions) =
+            acpi::init(&acpi_allocator, VirtAddr::new(rsdp_addr));
 
         interrupts::init(&acpi_platform_info);
 
         allocator::init();
 
-        pci::init(pci_regions, boot_info.physical_memory_offset.into());
+        pci::init(pci_regions, physical_memory_offset);
     }
 
     local::init();
@@ -77,11 +72,26 @@ fn kernel_start(boot_info: &'static mut BootInfo) -> ! {
     crate::main();
 }
 
-bootloader_api::entry_point!(kernel_start, config = &CONFIG);
+pub fn init_smp() {
+    let smp = SMP.get_response().get_mut().unwrap();
+    let bsp_lapic_id = smp.bsp_lapic_id;
+    for cpu in smp.cpus().iter_mut() {
+        if cpu.lapic_id == bsp_lapic_id {
+            continue;
+        }
+        cpu.goto_address = ap_entry;
+    }
+}
+
+extern "C" fn ap_entry(boot_info: *const SmpInfo) -> ! {
+    let boot_info = unsafe { &*boot_info };
+    local::init();
+    crate::ap_main(boot_info.processor_id as _);
+}
 
 pub use framebuffer::_print;
 pub use local::Local;
-pub use pci::get_devices as get_pci_devices;
+// pub use pci::get_devices as get_pci_devices;
 pub use stack_trace::stack_trace;
 
 #[inline(always)]
