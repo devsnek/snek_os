@@ -60,7 +60,7 @@ unsafe extern "C" fn _start() -> ! {
     );
 
     {
-        let acpi_allocator = stack_allocator::StackAllocator::<256>::new();
+        let acpi_allocator = acpi::AcpiAllocator::new();
         let rsdp_addr = RSDP.get_response().get().unwrap().address.as_ptr().unwrap() as u64;
         let (acpi_platform_info, pci_regions) =
             acpi::init(&acpi_allocator, VirtAddr::new(rsdp_addr));

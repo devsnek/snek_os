@@ -4,7 +4,7 @@ use acpi::{
 };
 use x86_64::VirtAddr;
 
-pub type AcpiAllocator = StackAllocator<256>;
+pub type AcpiAllocator = StackAllocator<2048>;
 
 pub fn init(
     allocator: &AcpiAllocator,
