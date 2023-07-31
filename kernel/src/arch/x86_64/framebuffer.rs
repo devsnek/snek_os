@@ -67,7 +67,7 @@ const BORDER_PADDING: usize = 1;
 const CHAR_RASTER_HEIGHT: RasterHeight = RasterHeight::Size16;
 const FONT_WEIGHT: FontWeight = FontWeight::Regular;
 const LINE_HEIGHT: usize = CHAR_RASTER_HEIGHT.val() + LINE_SPACING;
-const BACKUP_CHAR: char = '�';
+const BACKUP_CHAR: char = '\u{FFFD}';
 
 fn get_char_raster(c: char) -> RasterizedChar {
     fn get(c: char) -> Option<RasterizedChar> {

@@ -10,7 +10,7 @@ crossbeam-queue = { version = "0.3", default-features = false, features = ["allo
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 conquer-once = { version = "0.3", default-features = false }
-noto-sans-mono-bitmap = "0.2"
+noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = ["size_16", "regular", "unicode-basic-latin", "unicode-specials"] }
 mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
 maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "09c84f4e8171f60b1f0ab03627ba5040934dc3a7" }
 rand_xoshiro = "0.6"
@@ -28,6 +28,7 @@ embedded-graphics = "0.8"
 x86_64 = "0.14"
 pic8259 = "0.10"
 acpi = { git = "https://github.com/rust-osdev/acpi.git", rev = "e41036d3749a5a901e62cdf62011c735bf283e9c" }
+aml = "0.16.4"
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"

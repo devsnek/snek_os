@@ -9,12 +9,14 @@ fn panic(info: &PanicInfo) -> ! {
 
     unsafe {
         if IN_PANIC {
+            e9::println!("PANIC IN PANIC: {}", info);
             println!("PANIC IN PANIC: {}", info);
             crate::arch::halt_loop();
         }
         IN_PANIC = true;
     }
 
+    e9::println!("PANIC: {}", info);
     println!("PANIC: {}", info);
 
     crate::arch::stack_trace(16, |frame| {

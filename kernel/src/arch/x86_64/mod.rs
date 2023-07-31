@@ -97,6 +97,7 @@ extern "C" fn ap_entry(boot_info: *const SmpInfo) -> ! {
 pub use framebuffer::_print;
 pub use local::Local;
 // pub use pci::get_devices as get_pci_devices;
+pub use acpi::shutdown;
 pub use stack_trace::stack_trace;
 
 #[inline(always)]

@@ -33,7 +33,7 @@ mod mouse;
 use keyboard::{Keyboard, KeyboardKind};
 pub use mouse::MouseState;
 use mouse::{Mouse, MouseKind};
-pub use pc_keyboard::DecodedKey;
+pub use pc_keyboard::{DecodedKey, KeyCode};
 
 #[derive(Debug)]
 #[non_exhaustive]

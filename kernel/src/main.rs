@@ -36,6 +36,7 @@ mod debug;
 mod arch;
 mod drivers;
 mod panic;
+mod shell;
 mod task;
 
 pub fn main() -> ! {
@@ -43,15 +44,17 @@ pub fn main() -> ! {
 
     drivers::init();
 
-    arch::init_smp();
+    task::spawn(shell::shell());
 
-    task::start();
+    task::spawn(async {
+        arch::init_smp();
+    });
 
+    task::start(0);
     arch::halt_loop();
 }
 
 pub fn ap_main(ap_id: u8) -> ! {
-    task::ap_start(ap_id);
-
+    task::start(ap_id);
     arch::halt_loop();
 }

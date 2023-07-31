@@ -6,7 +6,7 @@ ifeq ($(BUILD), debug)
 endif
 
 KERNEL = target/x86_64-unknown-none/$(BUILD)/snek_kernel
-ISO = out/snek_os.iso
+ISO = out/$(BUILD)/snek_os.iso
 LIMINE = out/limine/limine
 OVMF = out/ovmf/OVMF.fd
 
@@ -26,7 +26,9 @@ $(KERNEL): FORCE
 	cargo build --profile $(PROFILE) --package snek_kernel --target x86_64-unknown-none
 
 $(ISO): $(KERNEL) $(OVMF) $(LIMINE)
+	rm -rf out/iso_root
 	mkdir -p out/iso_root
+	mkdir -p out/$(BUILD)
 	cp $(KERNEL) out/iso_root/kernel.elf
 	cp kernel/limine.cfg out/iso_root/
 	cp -v out/limine/limine-bios.sys out/limine/limine-bios-cd.bin out/limine/limine-uefi-cd.bin out/iso_root/
@@ -47,7 +49,7 @@ clean:
 	cargo clean
 	rm -rf out
 
-format:
+fmt:
 	cargo fmt
 
 clippy:
@@ -59,7 +61,7 @@ run: $(ISO)
 		-M q35 \
 		-debugcon /dev/stdout \
 		--no-shutdown --no-reboot \
-		-smp 2 \
+		-smp 4 \
 		-m 2G \
 		-device qemu-xhci \
 		-bios $(OVMF) \
