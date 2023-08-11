@@ -26,6 +26,7 @@ use core::{
     any::Any,
     cell::Cell,
     future::Future,
+    panic::UnwindSafe,
     pin::Pin,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     task::{Context, Poll},
@@ -203,7 +204,7 @@ pub struct CatchUnwind<Fut> {
 
 impl<Fut> Future for CatchUnwind<Fut>
 where
-    Fut: Future,
+    Fut: Future + UnwindSafe,
 {
     type Output = Result<Fut::Output, Box<dyn Any + Send>>;
 
@@ -221,7 +222,7 @@ where
 
 pub fn spawn<F>(future: F) -> JoinHandle<<CatchUnwind<F> as Future>::Output>
 where
-    F: Future + Send + 'static,
+    F: Future + UnwindSafe + Send + 'static,
     F::Output: Send + 'static,
 {
     let future = CatchUnwind { future };

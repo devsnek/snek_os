@@ -1,5 +1,4 @@
-use crate::drivers::i8042::KeyStream;
-use futures_util::StreamExt;
+use crate::drivers::i8042::next_key;
 use i8042::{DecodedKey, KeyCode};
 
 fn run(line: &str) {
@@ -13,15 +12,19 @@ fn run(line: &str) {
         });
         return;
     }
+    if line == "loop" {
+        crate::task::spawn(async {
+            crate::arch::halt_loop();
+        });
+        return;
+    }
     println!("unknown command");
 }
 
 pub async fn shell() {
-    let mut keys = KeyStream::new();
-
     let mut line = String::new();
     print!("> ");
-    while let Some(key) = keys.next().await {
+    while let Some(key) = next_key().await {
         match key {
             DecodedKey::Unicode('\r') | DecodedKey::Unicode('\n') => {
                 print!("\n");

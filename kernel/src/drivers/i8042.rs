@@ -1,10 +1,11 @@
 use conquer_once::spin::OnceCell;
 use core::{
+    future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use crossbeam_queue::ArrayQueue;
-use futures_util::{stream::Stream, task::AtomicWaker};
+use futures_util::task::AtomicWaker;
 use i8042::{Change, DecodedKey, Driver8042, Irq, MouseState};
 
 #[cfg(target_arch = "x86_64")]
@@ -70,18 +71,12 @@ pub fn init() {
     MOUSE_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
 }
 
-pub struct KeyStream {}
+struct KeyFuture;
 
-impl KeyStream {
-    pub fn new() -> Self {
-        KeyStream {}
-    }
-}
+impl Future for KeyFuture {
+    type Output = Option<DecodedKey>;
 
-impl Stream for KeyStream {
-    type Item = DecodedKey;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let Ok(queue) = KEY_QUEUE.try_get() else {
             return Poll::Ready(None);
         };
@@ -102,18 +97,16 @@ impl Stream for KeyStream {
     }
 }
 
-pub struct MouseStream {}
-
-impl MouseStream {
-    pub fn new() -> Self {
-        MouseStream {}
-    }
+pub async fn next_key() -> Option<DecodedKey> {
+    KeyFuture.await
 }
 
-impl Stream for MouseStream {
-    type Item = MouseState;
+struct MouseFuture;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+impl Future for MouseFuture {
+    type Output = Option<MouseState>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let Ok(queue) = MOUSE_QUEUE.try_get() else {
             return Poll::Ready(None);
         };
@@ -132,4 +125,8 @@ impl Stream for MouseStream {
             None => Poll::Pending,
         }
     }
+}
+
+pub async fn next_mouse_state() -> Option<MouseState> {
+    MouseFuture.await
 }
