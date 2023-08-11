@@ -209,7 +209,13 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let f = self.project().future;
-        unwinding::panic::catch_unwind(|| f.poll(cx))?.map(Ok)
+        match unwinding::panic::catch_unwind(|| f.poll(cx)) {
+            Ok(v) => v.map(Ok),
+            Err(e) => {
+                crate::panic::inspect(&*e);
+                Poll::Ready(Err(e))
+            }
+        }
     }
 }
 

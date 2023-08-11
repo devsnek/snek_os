@@ -7,6 +7,12 @@ fn run(line: &str) {
         crate::arch::shutdown();
         return;
     }
+    if line == "panic" {
+        crate::task::spawn(async {
+            panic!("a panic!");
+        });
+        return;
+    }
     println!("unknown command");
 }
 

@@ -1,4 +1,4 @@
-use core::panic::PanicInfo;
+use core::{any::Any, panic::PanicInfo};
 use rustc_demangle::demangle;
 use unwinding::abi::{UnwindContext, UnwindReasonCode, _Unwind_Backtrace, _Unwind_GetIP};
 use x86_64::VirtAddr;
@@ -22,7 +22,7 @@ pub fn init(kernel_slice: &'static [u8], kernel_base: VirtAddr) {
 
 struct PanicData {
     info: String,
-    stack_trace: Vec<StackFrame>,
+    stack_frames: Vec<StackFrame>,
 }
 
 #[panic_handler]
@@ -40,18 +40,38 @@ fn panic(info: &PanicInfo) -> ! {
         crate::arch::halt_loop();
     }
 
-    let mut frames = Vec::new();
+    let mut stack_frames = Vec::new();
 
-    stack_trace(16, |frame| {
-        frames.push(frame);
+    stack_trace(32, |frame| {
+        stack_frames.push(frame);
     });
 
     let code = unwinding::panic::begin_panic(Box::new(PanicData {
         info: format!("{}", info),
-        stack_trace: frames,
+        stack_frames,
     }));
     println!("failed to panic, error {}", code.0);
     crate::arch::halt_loop();
+}
+
+pub fn inspect(e: &(dyn Any + Send)) {
+    if let Some(data) = e.downcast_ref::<PanicData>() {
+        println!("{}", data.info);
+        for frame in &data.stack_frames {
+            if let Some((f_addr, f_name)) = frame.function {
+                println!(
+                    "  at 0x{:016x} {:#}+0x{:x}",
+                    frame.address,
+                    demangle(f_name),
+                    frame.address - f_addr
+                );
+            } else {
+                println!("  at 0x{:016x}", frame.address);
+            }
+        }
+    } else {
+        println!("external panic, halting");
+    }
 }
 
 pub fn catch_unwind<F, T>(f: F) -> T
@@ -61,28 +81,11 @@ where
     match unwinding::panic::catch_unwind(f) {
         Ok(v) => v,
         Err(e) => {
-            if let Some(data) = e.downcast_ref::<PanicData>() {
-                println!("{}", data.info);
-                for frame in &data.stack_trace {
-                    if let Some((f_addr, f_name)) = frame.function {
-                        println!(
-                            "  at 0x{:016x} {:#}+0x{:x}",
-                            frame.address,
-                            demangle(f_name),
-                            frame.address - f_addr
-                        );
-                    } else {
-                        println!("  at 0x{:016x}", frame.address);
-                    }
-                }
-            } else {
-                println!("external panic, halting");
-            }
+            inspect(&*e);
             crate::arch::halt_loop();
         }
     }
 }
-
 #[derive(Debug)]
 pub struct StackFrame {
     pub address: usize,
