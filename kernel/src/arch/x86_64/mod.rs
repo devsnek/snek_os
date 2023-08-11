@@ -8,7 +8,6 @@ mod memory;
 mod pci;
 mod pit;
 mod stack_allocator;
-mod stack_trace;
 
 use limine::{
     FramebufferRequest, HhdmRequest, KernelAddressRequest, KernelFileRequest, MemmapRequest,
@@ -26,7 +25,13 @@ static SMP: SmpRequest = SmpRequest::new(0);
 
 #[no_mangle]
 unsafe extern "C" fn _start() -> ! {
+    crate::panic::catch_unwind(start);
+}
+
+fn start() -> ! {
     e9::println!("hey there :)");
+
+    init_sse();
 
     if let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() {
         if framebuffer_response.framebuffer_count > 0 {
@@ -54,7 +59,7 @@ unsafe extern "C" fn _start() -> ! {
 
     let kernel_file_base = kernel_file.base.as_ptr().unwrap();
 
-    stack_trace::init(
+    crate::panic::init(
         unsafe { core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _) },
         VirtAddr::new(kernel_address.virtual_base),
     );
@@ -89,16 +94,32 @@ pub fn init_smp() {
 }
 
 extern "C" fn ap_entry(boot_info: *const SmpInfo) -> ! {
-    let boot_info = unsafe { &*boot_info };
-    local::init();
-    crate::ap_main(boot_info.processor_id as _);
+    crate::panic::catch_unwind(|| -> ! {
+        let boot_info = unsafe { &*boot_info };
+        local::init();
+        crate::ap_main(boot_info.processor_id as _);
+    });
+}
+
+fn init_sse() {
+    // unwinding uses stmxcsr which will UD if this isn't enabled
+    unsafe {
+        asm!("
+            mov rax, cr0
+            and ax, 0xFFFB		// clear coprocessor emulation CR0.EM
+            or ax, 0x2			  // set coprocessor monitoring  CR0.MP
+            mov cr0, rax
+            mov rax, cr4
+            or ax, 3 << 9		  // set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time
+            mov cr4, rax
+        ");
+    }
 }
 
 pub use framebuffer::_print;
 pub use local::Local;
 // pub use pci::get_devices as get_pci_devices;
 pub use acpi::shutdown;
-pub use stack_trace::stack_trace;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

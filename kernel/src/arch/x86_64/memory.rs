@@ -3,8 +3,9 @@ use limine::{MemmapEntry, MemoryMapEntryType, NonNullPtr};
 use spin::Mutex;
 use x86_64::{
     structures::paging::{
-        page::PageRange, FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable,
-        PageTableFlags, PhysFrame, Size4KiB, Translate,
+        page::{PageRange, Size4KiB},
+        FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable, PageTableFlags,
+        PhysFrame, Translate,
     },
     PhysAddr, VirtAddr,
 };

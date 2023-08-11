@@ -167,6 +167,10 @@ dependencies = [
 [[package]]
 name = "e9"
 version = "0.1.0"
+dependencies = [
+ "tracing 0.1.37",
+ "tracing-subscriber",
+]
 
 [[package]]
 name = "embedded-graphics"
@@ -298,6 +302,12 @@ dependencies = [
  "rustversion",
  "windows",
 ]
+
+[[package]]
+name = "gimli"
+version = "0.26.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22030e2c5a68ec659fde1e949a745124b48e6fa8b045b7ed5bd1fe4ccc5c4e5d"
 
 [[package]]
 name = "i8042"
@@ -859,12 +869,16 @@ dependencies = [
  "pci-ids",
  "pci_types",
  "pic8259",
+ "pin-project",
  "rand",
  "rand_xoshiro",
  "raw-cpuid",
  "rustc-demangle",
  "snalloc",
  "spin 0.9.8",
+ "tracing 0.1.37",
+ "tracing-subscriber",
+ "unwinding",
  "x2apic",
  "x86_64",
  "xmas-elf",
@@ -1013,6 +1027,15 @@ name = "unicode-ident"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "301abaae475aa91687eb82514b328ab47a211a533026cb25fc3e519b86adfc3c"
+
+[[package]]
+name = "unwinding"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ee215fc0991fb587275819562685254302112d0b7c8d25e635655526c0ecdc6"
+dependencies = [
+ "gimli",
+]
 
 [[package]]
 name = "valuable"

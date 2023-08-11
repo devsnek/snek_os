@@ -23,14 +23,18 @@
 use crate::arch::Local;
 use conquer_once::spin::OnceCell;
 use core::{
+    any::Any,
     cell::Cell,
     future::Future,
+    pin::Pin,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    task::{Context, Poll},
 };
 use maitake::{
     scheduler::{Injector, StaticScheduler, Stealer, TaskStub},
     task::JoinHandle,
 };
+use pin_project::pin_project;
 use rand::{Rng, SeedableRng};
 
 static SCHEDULER: Local<Cell<Option<&'static StaticScheduler>>> = Local::new(|| Cell::new(None));
@@ -71,7 +75,10 @@ impl Runtime {
         &'static self,
         idx: usize,
     ) -> Option<Stealer<'static, &'static StaticScheduler>> {
-        self.cores[idx].try_get().unwrap().try_steal().ok()
+        if let Ok(core) = self.cores[idx].try_get() {
+            return core.try_steal().ok();
+        }
+        None
     }
 }
 
@@ -188,11 +195,30 @@ impl Executor {
     }
 }
 
-pub fn spawn<F>(future: F) -> JoinHandle<F::Output>
+#[pin_project]
+pub struct CatchUnwind<Fut> {
+    #[pin]
+    future: Fut,
+}
+
+impl<Fut> Future for CatchUnwind<Fut>
+where
+    Fut: Future,
+{
+    type Output = Result<Fut::Output, Box<dyn Any + Send>>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let f = self.project().future;
+        unwinding::panic::catch_unwind(|| f.poll(cx))?.map(Ok)
+    }
+}
+
+pub fn spawn<F>(future: F) -> JoinHandle<<CatchUnwind<F> as Future>::Output>
 where
     F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
+    let future = CatchUnwind { future };
     SCHEDULER.with(|scheduler| {
         if let Some(scheduler) = scheduler.get() {
             scheduler.spawn(future)

@@ -100,6 +100,7 @@ impl Keyboard {
                     (Some(0x00), None)
                 }
                 Init::ReqScancodeSetRsp => match data {
+                    #[allow(clippy::manual_range_patterns)]
                     1 | 2 | 3 => {
                         self.state = State::Init(Init::EnableAck(data));
                         (Some(0xF4), None)

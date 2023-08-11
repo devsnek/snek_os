@@ -4,10 +4,10 @@ use x86_64::{
         tables::load_tss,
     },
     structures::{
-        gdt::{Descriptor, DescriptorFlags, GlobalDescriptorTable, SegmentSelector},
+        gdt::{Descriptor, GlobalDescriptorTable, SegmentSelector},
         tss::TaskStateSegment,
     },
-    PrivilegeLevel, VirtAddr,
+    VirtAddr,
 };
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
@@ -44,27 +44,16 @@ lazy_static! {
         let mut gdt = GlobalDescriptorTable::new();
 
         let kernel_code = Descriptor::kernel_code_segment();
-
-        let kernel_data = {
-            let flags = DescriptorFlags::USER_SEGMENT
-                | DescriptorFlags::PRESENT
-                | DescriptorFlags::WRITABLE;
-            Descriptor::UserSegment(flags.bits())
-        };
-
+        let kernel_data = Descriptor::kernel_data_segment();
         let user_code = Descriptor::user_code_segment();
         let user_data = Descriptor::user_data_segment();
 
         // The order is required.
         let kernel_code_selector = gdt.add_entry(kernel_code);
-
         let kernel_data_selector = gdt.add_entry(kernel_data);
 
-        let mut user_data_selector = gdt.add_entry(user_data);
-        user_data_selector.set_rpl(PrivilegeLevel::Ring3);
-
-        let mut user_code_selector = gdt.add_entry(user_code);
-        user_code_selector.set_rpl(PrivilegeLevel::Ring3);
+        let user_data_selector = gdt.add_entry(user_data);
+        let user_code_selector = gdt.add_entry(user_code);
 
         let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
 
@@ -97,12 +86,11 @@ pub fn init() {
 
         CS::set_reg(GDT.1.kernel_code_selector);
 
-        DS::set_reg(SegmentSelector::NULL);
-        ES::set_reg(SegmentSelector::NULL);
+        DS::set_reg(GDT.1.kernel_data_selector);
+        ES::set_reg(GDT.1.kernel_data_selector);
         FS::set_reg(GDT.1.kernel_data_selector);
         GS::set_reg(GDT.1.kernel_data_selector);
-
-        SS::set_reg(SegmentSelector::NULL);
+        SS::set_reg(GDT.1.kernel_data_selector);
 
         load_tss(GDT.1.tss_selector);
     }

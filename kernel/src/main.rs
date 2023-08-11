@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+#![allow(internal_features)]
 #![feature(abi_x86_interrupt)]
 #![feature(alloc_error_handler)]
 #![feature(prelude_import)]
@@ -11,6 +12,8 @@
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
 #![feature(inline_const)]
+#![feature(panic_can_unwind)]
+#![feature(core_panic)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -40,6 +43,8 @@ mod shell;
 mod task;
 
 pub fn main() -> ! {
+    debug::init();
+
     println!("Welcome to snek_os");
 
     drivers::init();

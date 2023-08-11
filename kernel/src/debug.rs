@@ -1,6 +1,13 @@
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => ($crate::arch::_print(format_args!($($arg)*)));
+    ($($arg:tt)*) => {
+        match format_args!($($arg)*) {
+            tmp => {
+                e9::_print(tmp);
+                $crate::arch::_print(tmp);
+            }
+        };
+    }
 }
 
 #[macro_export]
@@ -15,8 +22,6 @@ macro_rules! dbg {
         $crate::println!("[{}:{}]", file!(), line!());
     };
     ($val:expr) => {
-        // Use of `match` here is intentional because it affects the lifetimes
-        // of temporaries - https://stackoverflow.com/a/48732525/1063961
         match $val {
             tmp => {
                 $crate::println!("[{}:{}] {} = {:#?}", file!(), line!(), stringify!($val), &tmp);
@@ -24,7 +29,6 @@ macro_rules! dbg {
             }
         }
     };
-    // Trailing comma with single argument is ignored
     ($val:expr,) => { $crate::dbg!($val) };
     ($($val:expr),+ $(,)?) => {
         ($($crate::dbg!($val)),+,)
@@ -37,4 +41,28 @@ macro_rules! format {
         let res = alloc::fmt::format(format_args!($($arg)*));
         res
     }}
+}
+
+struct Subscriber;
+
+impl tracing::Subscriber for Subscriber {
+    fn enabled(&self, _meta: &tracing::Metadata) -> bool {
+        true
+    }
+
+    fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::Id {
+        tracing::Id::from_u64(0)
+    }
+    fn record(&self, _: &tracing::Id, _: &tracing::span::Record<'_>) {}
+    fn record_follows_from(&self, _: &tracing::Id, _: &tracing::Id) {}
+    fn event(&self, _: &tracing::Event<'_>) {}
+    fn enter(&self, _: &tracing::Id) {}
+    fn exit(&self, _: &tracing::Id) {}
+}
+
+pub fn init() {
+    use tracing_subscriber::layer::Layer;
+
+    tracing::subscriber::set_global_default(e9::tracing::Layer.with_subscriber(Subscriber))
+        .unwrap();
 }

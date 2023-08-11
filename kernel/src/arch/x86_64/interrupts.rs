@@ -8,7 +8,10 @@ use x2apic::{
     lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
-    registers::{control::Cr2, segmentation::GS},
+    registers::{
+        control::Cr2,
+        segmentation::{SegmentSelector, GS},
+    },
     structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode},
     PhysAddr,
 };
@@ -92,13 +95,15 @@ extern "x86-interrupt" fn invalid_tss_handler(stack_frame: InterruptStackFrame, 
 
 extern "x86-interrupt" fn segment_not_present_handler(
     stack_frame: InterruptStackFrame,
-    _error_code: u64,
+    segment_selector: u64,
 ) {
     prologue!();
 
-    println!("SEGMENT NOT PRESENT {:#?}", stack_frame);
-
-    epilogue!();
+    panic!(
+        "SEGMENT NOT PRESENT {:?} {:?}",
+        SegmentSelector(segment_selector as _),
+        stack_frame
+    );
 }
 
 extern "x86-interrupt" fn general_protection_fault_handler(

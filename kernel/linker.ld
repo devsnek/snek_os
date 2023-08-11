@@ -26,6 +26,7 @@ SECTIONS
     .text : {
         *(.text .text.*)
     } :text
+    PROVIDE (__etext = .);
 
     /* Move to the next memory page for .rodata */
     . += CONSTANT(MAXPAGESIZE);
@@ -33,6 +34,12 @@ SECTIONS
     .rodata : {
         *(.rodata .rodata.*)
     } :rodata
+
+    .eh_frame_hdr   : { *(.eh_frame_hdr) *(.eh_frame_entry .eh_frame_entry.*) }
+    . = ALIGN(8);
+    PROVIDE(__eh_frame = .);
+    .eh_frame       : ONLY_IF_RO { KEEP (*(.eh_frame)) *(.eh_frame.*) }
+    .eh_frame       : ONLY_IF_RW { KEEP (*(.eh_frame)) *(.eh_frame.*) }
 
     /* Move to the next memory page for .data */
     . += CONSTANT(MAXPAGESIZE);
@@ -57,7 +64,6 @@ SECTIONS
 
     /* Discard .note.* and .eh_frame since they may cause issues on some hosts. */
     /DISCARD/ : {
-        *(.eh_frame)
         *(.note .note.*)
     }
 }

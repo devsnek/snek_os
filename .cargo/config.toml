@@ -1,8 +1,10 @@
 [build]
 rustflags = [
-  "-Cforce-frame-pointers",
+  "-Cforce-frame-pointers=yes",
   "-Csymbol-mangling-version=v0",
+  "-Cforce-unwind-tables",
+  "-Cpanic=unwind",
 ]
 
 [unstable]
-bindeps = true
+build-std = ["core", "alloc"]

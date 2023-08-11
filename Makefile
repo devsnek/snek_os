@@ -34,7 +34,6 @@ $(ISO): $(KERNEL) $(OVMF) $(LIMINE)
 	cp -v out/limine/limine-bios.sys out/limine/limine-bios-cd.bin out/limine/limine-uefi-cd.bin out/iso_root/
 	mkdir -p out/iso_root/EFI/BOOT
 	cp -v out/limine/BOOTX64.EFI out/iso_root/EFI/BOOT/
-	cp -v out/limine/BOOTIA32.EFI out/iso_root/EFI/BOOT/
 	xorriso -as mkisofs -b limine-bios-cd.bin \
 		-no-emul-boot -boot-load-size 4 -boot-info-table \
 		--efi-boot limine-uefi-cd.bin \
