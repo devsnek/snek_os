@@ -129,8 +129,8 @@ checksum = "e763eef8846b13b380f37dfecda401770b0ca4e56e95170237bd7c25c7db3582"
 
 [[package]]
 name = "cordyceps"
-version = "0.3.1"
-source = "git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7#09c84f4e8171f60b1f0ab03627ba5040934dc3a7"
+version = "0.3.2"
+source = "git+https://github.com/devsnek/mycelium.git?rev=e23b02810a9586fe268868c01c36c1d4d6dfa37f#e23b02810a9586fe268868c01c36c1d4d6dfa37f"
 dependencies = [
  "loom",
  "tracing 0.1.37",
@@ -168,6 +168,7 @@ dependencies = [
 name = "e9"
 version = "0.1.0"
 dependencies = [
+ "spin 0.9.8",
  "tracing 0.1.37",
  "tracing-subscriber",
 ]
@@ -392,13 +393,13 @@ dependencies = [
 [[package]]
 name = "maitake"
 version = "0.1.0"
-source = "git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7#09c84f4e8171f60b1f0ab03627ba5040934dc3a7"
+source = "git+https://github.com/devsnek/mycelium.git?rev=e23b02810a9586fe268868c01c36c1d4d6dfa37f#e23b02810a9586fe268868c01c36c1d4d6dfa37f"
 dependencies = [
  "cordyceps",
- "mycelium-bitfield 0.1.2 (git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7)",
+ "mycelium-bitfield 0.1.3",
  "mycelium-util",
  "pin-project",
- "portable-atomic 0.3.20",
+ "portable-atomic",
 ]
 
 [[package]]
@@ -441,21 +442,21 @@ dependencies = [
 [[package]]
 name = "mycelium-bitfield"
 version = "0.1.2"
-source = "git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7#09c84f4e8171f60b1f0ab03627ba5040934dc3a7"
+source = "git+https://github.com/hawkw/mycelium.git?rev=f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3#f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3"
 
 [[package]]
 name = "mycelium-bitfield"
-version = "0.1.2"
-source = "git+https://github.com/hawkw/mycelium.git?rev=f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3#f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3"
+version = "0.1.3"
+source = "git+https://github.com/devsnek/mycelium.git?rev=e23b02810a9586fe268868c01c36c1d4d6dfa37f#e23b02810a9586fe268868c01c36c1d4d6dfa37f"
 
 [[package]]
 name = "mycelium-util"
 version = "0.1.0"
-source = "git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7#09c84f4e8171f60b1f0ab03627ba5040934dc3a7"
+source = "git+https://github.com/devsnek/mycelium.git?rev=e23b02810a9586fe268868c01c36c1d4d6dfa37f#e23b02810a9586fe268868c01c36c1d4d6dfa37f"
 dependencies = [
  "cordyceps",
  "loom",
- "mycelium-bitfield 0.1.2 (git+https://github.com/hawkw/mycelium.git?rev=09c84f4e8171f60b1f0ab03627ba5040934dc3a7)",
+ "mycelium-bitfield 0.1.3",
  "tracing 0.2.0",
 ]
 
@@ -664,15 +665,6 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "0.3.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e30165d31df606f5726b090ec7592c308a0eaf61721ff64c9a3018e344a8753e"
-dependencies = [
- "portable-atomic 1.4.2",
-]
-
-[[package]]
-name = "portable-atomic"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f32154ba0af3a075eefa1eda8bb414ee928f62303a54ea85b8d6638ff1a6ee9e"
@@ -863,7 +855,7 @@ dependencies = [
  "lazy_static",
  "limine",
  "maitake",
- "mycelium-bitfield 0.1.2 (git+https://github.com/hawkw/mycelium.git?rev=f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3)",
+ "mycelium-bitfield 0.1.2",
  "noto-sans-mono-bitmap",
  "os_units",
  "pci-ids",

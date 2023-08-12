@@ -2,7 +2,6 @@ use super::{acpi::AcpiAllocator, gdt};
 use acpi::{platform::interrupt::Apic as ApicInfo, InterruptModel, PlatformInfo};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
-use spin::Mutex;
 use x2apic::{
     ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry},
     lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
@@ -32,8 +31,6 @@ const NUM_VECTORS: usize = 256;
 const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
 const LOCAL_APIC_TIMER: usize = NUM_VECTORS - 2;
 const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
-
-pub static LAPIC: Mutex<Option<LocalApic>> = Mutex::new(None);
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -234,33 +231,34 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
 
 #[inline(always)]
 unsafe fn end_of_interrupt() {
-    LAPIC.lock().as_mut().unwrap().end_of_interrupt();
+    get_lapic().end_of_interrupt();
 }
 
-fn init_lapic(apic_info: &ApicInfo<AcpiAllocator>) {
+static mut LAPIC_ADDRESS: usize = 0;
+
+fn get_lapic() -> LocalApic {
+    LocalApicBuilder::new()
+        .timer_vector(LOCAL_APIC_TIMER)
+        .error_vector(LOCAL_APIC_ERROR)
+        .spurious_vector(LOCAL_APIC_SPURIOUS)
+        .set_xapic_base(unsafe { LAPIC_ADDRESS } as _)
+        .build()
+        .unwrap()
+}
+
+fn init_lapic() {
     unsafe {
         // Disable PIC so it doesn't interfere with LAPIC/IOPICs
         let mut pics = ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET);
         pics.disable();
     }
 
-    let apic_virtual_address =
-        super::memory::map_address(PhysAddr::new(apic_info.local_apic_address), 4096);
-
-    let mut lapic = LocalApicBuilder::new()
-        .timer_vector(LOCAL_APIC_TIMER)
-        .error_vector(LOCAL_APIC_ERROR)
-        .spurious_vector(LOCAL_APIC_SPURIOUS)
-        .set_xapic_base(apic_virtual_address.as_u64())
-        .build()
-        .unwrap();
+    let mut lapic = get_lapic();
 
     unsafe {
         lapic.enable();
         lapic.disable_timer();
     }
-
-    let _ = LAPIC.lock().insert(lapic);
 
     println!("[LAPIC] initialized");
 }
@@ -279,8 +277,13 @@ fn init_ioapic(apic_info: &ApicInfo<AcpiAllocator>) {
         let mut entry = RedirectionTableEntry::default();
         entry.set_mode(IrqMode::Fixed);
         entry.set_flags(IrqFlags::LEVEL_TRIGGERED | IrqFlags::LOW_ACTIVE | IrqFlags::MASKED);
-        entry.set_dest(LOCAL_APIC_SPURIOUS as u8);
         entry.set_vector(IOAPIC_START + i);
+        let dest = if i == PS2_MOUSE_IRQ || i == PS2_KEYBOARD_IRQ {
+            0
+        } else {
+            LOCAL_APIC_SPURIOUS
+        };
+        entry.set_dest(dest as u8);
         unsafe {
             ioapic.set_table_entry(i, entry);
         }
@@ -311,24 +314,19 @@ fn timer_frequency_hz() -> u32 {
         return frequency_hz;
     }
 
-    {
-        let mut lapic = LAPIC.lock();
-        let lapic = lapic.as_mut().unwrap();
+    let mut lapic = get_lapic();
 
-        unsafe {
-            lapic.set_timer_divide(TimerDivide::Div16);
-            lapic.set_timer_initial(-1i32 as u32);
-            lapic.set_timer_mode(TimerMode::OneShot);
-            lapic.enable_timer();
-        }
+    unsafe {
+        lapic.set_timer_divide(TimerDivide::Div16);
+        lapic.set_timer_initial(-1i32 as u32);
+        lapic.set_timer_mode(TimerMode::OneShot);
+        lapic.enable_timer();
     }
 
     super::pit::PIT
         .lock()
         .sleep(crate::task::timer::TIMER_INTERVAL);
 
-    let mut lapic = LAPIC.lock();
-    let lapic = lapic.as_mut().unwrap();
     unsafe {
         lapic.disable_timer();
     }
@@ -339,8 +337,6 @@ fn timer_frequency_hz() -> u32 {
 }
 
 fn init_timing() {
-    crate::task::timer::init();
-
     let interval = core::time::Duration::from_millis(10);
     let timer_frequency_hz = timer_frequency_hz();
     let ticks_per_ms = timer_frequency_hz / 1000;
@@ -348,8 +344,7 @@ fn init_timing() {
     let interval_ms = interval.as_millis() as u32;
     let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).unwrap();
 
-    let mut lapic = LAPIC.lock();
-    let lapic = lapic.as_mut().unwrap();
+    let mut lapic = get_lapic();
 
     unsafe {
         lapic.set_timer_divide(TimerDivide::Div16);
@@ -368,13 +363,26 @@ pub fn init(acpi_platform_info: &PlatformInfo<AcpiAllocator>) {
         panic!("unsupported interrupt model")
     };
 
-    init_lapic(apic_info);
+    unsafe {
+        LAPIC_ADDRESS =
+            super::memory::map_address(PhysAddr::new(apic_info.local_apic_address), 4096).as_u64()
+                as _;
+    }
+    init_lapic();
 
     init_ioapic(apic_info);
 
+    crate::task::timer::init();
     init_timing();
 
     x86_64::instructions::interrupts::enable();
 
     println!("[INTERRUPTS] initialized");
+}
+
+pub fn init_smp() {
+    IDT.load();
+    init_lapic();
+    init_timing();
+    x86_64::instructions::interrupts::enable();
 }

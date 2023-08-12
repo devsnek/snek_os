@@ -76,10 +76,7 @@ impl Runtime {
         &'static self,
         idx: usize,
     ) -> Option<Stealer<'static, &'static StaticScheduler>> {
-        if let Ok(core) = self.cores[idx].try_get() {
-            return core.try_steal().ok();
-        }
-        None
+        self.cores[idx].try_get().ok()?.try_steal().ok()
     }
 }
 

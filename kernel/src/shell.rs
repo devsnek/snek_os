@@ -14,7 +14,8 @@ fn run(line: &str) {
     }
     if line == "loop" {
         crate::task::spawn(async {
-            crate::arch::halt_loop();
+            #[allow(clippy::empty_loop)]
+            loop {}
         });
         return;
     }

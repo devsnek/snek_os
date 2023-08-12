@@ -82,8 +82,21 @@ fn start() -> ! {
     crate::main();
 }
 
+static mut BOOT_INFO: Option<Vec<Option<gdt::ApInfo>>> = None;
+
 pub fn init_smp() {
     let smp = SMP.get_response().get_mut().unwrap();
+
+    let mut infos = Vec::new();
+    for _ in 0..smp.cpus().len() {
+        // allocate on main thread because ap can't set up
+        // lazy allocation interrupt until it sets up gdt.
+        infos.push(Some(gdt::allocate_for_ap()));
+    }
+    unsafe {
+        BOOT_INFO = Some(infos);
+    }
+
     let bsp_lapic_id = smp.bsp_lapic_id;
     for cpu in smp.cpus().iter_mut() {
         if cpu.lapic_id == bsp_lapic_id {
@@ -96,9 +109,24 @@ pub fn init_smp() {
 extern "C" fn ap_entry(boot_info: *const SmpInfo) -> ! {
     crate::panic::catch_unwind(|| -> ! {
         let boot_info = unsafe { &*boot_info };
-        local::init();
-        crate::ap_main(boot_info.processor_id as _);
+        start_smp(boot_info);
     });
+}
+
+fn start_smp(boot_info: &SmpInfo) -> ! {
+    init_sse();
+
+    gdt::init_smp(unsafe {
+        BOOT_INFO.as_mut().unwrap()[boot_info.processor_id as usize]
+            .take()
+            .unwrap()
+    });
+
+    interrupts::init_smp();
+
+    local::init();
+
+    crate::ap_main(boot_info.processor_id as _);
 }
 
 fn init_sse() {

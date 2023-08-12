@@ -1,13 +1,6 @@
 #[macro_export]
 macro_rules! print {
-    ($($arg:tt)*) => {
-        match format_args!($($arg)*) {
-            tmp => {
-                e9::_print(tmp);
-                $crate::arch::_print(tmp);
-            }
-        };
-    }
+    ($($arg:tt)*) => ($crate::arch::_print(format_args!($($arg)*)));
 }
 
 #[macro_export]
@@ -33,14 +26,6 @@ macro_rules! dbg {
     ($($val:expr),+ $(,)?) => {
         ($($crate::dbg!($val)),+,)
     };
-}
-
-#[macro_export]
-macro_rules! format {
-    ($($arg:tt)*) => {{
-        let res = alloc::fmt::format(format_args!($($arg)*));
-        res
-    }}
 }
 
 struct Subscriber;

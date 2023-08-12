@@ -29,6 +29,9 @@ impl<S: Subscriber> layer::Layer<S> for Layer {
             .and_then(|file| meta.line().map(|ln| format!("{}:{}", file, ln)))
             .unwrap_or_default();
 
+        static LOCK: spin::Mutex<()> = spin::Mutex::new(());
+        let _guard = LOCK.lock();
+
         crate::print!("{level} {origin}");
 
         struct Visitor;

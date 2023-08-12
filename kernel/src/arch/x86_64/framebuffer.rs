@@ -1,9 +1,8 @@
 use core::fmt::Write;
+use embedded_graphics::{pixelcolor::Rgb888, prelude::*, primitives::Rectangle};
 use limine::Framebuffer;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
-
-use embedded_graphics::{pixelcolor::Rgb888, prelude::*, primitives::Rectangle};
 
 static mut EMPTY_BUF: [u8; 0] = [];
 

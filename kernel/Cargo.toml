@@ -12,7 +12,7 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = ["size_16", "regular", "unicode-basic-latin", "unicode-specials"] }
 mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
-maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "09c84f4e8171f60b1f0ab03627ba5040934dc3a7" }
+maitake = { git = "https://github.com/devsnek/mycelium.git", rev = "e23b02810a9586fe268868c01c36c1d4d6dfa37f" }
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false }
 i8042 = { path = "../crates/i8042" }
