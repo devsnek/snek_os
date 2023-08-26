@@ -28,30 +28,65 @@ lazy_static! {
 }
 
 pub fn init(info: &Framebuffer) {
-    {
-        let mut display = DISPLAY.lock();
-        display.buffer =
-            unsafe { core::slice::from_raw_parts_mut(info.address.as_ptr().unwrap(), info.size()) };
-        display.width = info.width as _;
-        display.height = info.height as _;
-        display.bytes_per_pixel = (info.bpp / 8) as _;
-        display.stride = (info.pitch / 4) as _;
-        display.pixel_format = match (
-            info.red_mask_shift,
-            info.green_mask_shift,
-            info.blue_mask_shift,
-        ) {
-            (0x00, 0x08, 0x10) => PixelFormat::Rgb,
-            (0x10, 0x08, 0x00) => PixelFormat::Bgr,
-            (0x00, 0x00, 0x00) => PixelFormat::U8,
-            _ => PixelFormat::Unknown,
-        };
-        display.clear();
+    let mut display = DISPLAY.lock();
+    display.buffer =
+        unsafe { core::slice::from_raw_parts_mut(info.address.as_ptr().unwrap(), info.size()) };
+    display.width = info.width as _;
+    display.height = info.height as _;
+    display.bytes_per_pixel = (info.bpp / 8) as _;
+    display.stride = (info.pitch / 4) as _;
+    display.pixel_format = match (
+        info.red_mask_shift,
+        info.green_mask_shift,
+        info.blue_mask_shift,
+    ) {
+        (0x00, 0x08, 0x10) => PixelFormat::Rgb,
+        (0x10, 0x08, 0x00) => PixelFormat::Bgr,
+        (0x00, 0x00, 0x00) => PixelFormat::U8,
+        _ => PixelFormat::Unknown,
+    };
+    display.clear();
 
-        display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
+    display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
+}
+
+pub fn update_pages() {
+    use x86_64::{
+        structures::paging::{Page, PageTableFlags, Size2MiB},
+        VirtAddr,
+    };
+
+    let display = DISPLAY.lock();
+    let start = display.buffer.as_ptr();
+    let size = display.buffer.len();
+    drop(display);
+
+    let mut current = start;
+    let end = unsafe { start.add(size) };
+    loop {
+        let page = Page::<Size2MiB>::containing_address(VirtAddr::new(current as _));
+
+        // PAT 0 = WRITE_THROUGH
+        // PAT 1 = NO_CACHE
+        // PAT 2 = HUGE_PAGE
+        let pat_index = 5;
+        let mut flags = PageTableFlags::empty();
+        flags.set(PageTableFlags::PRESENT, true);
+        flags.set(PageTableFlags::WRITABLE, true);
+        flags.set(PageTableFlags::USER_ACCESSIBLE, true);
+        flags.set(
+            PageTableFlags::WRITE_THROUGH,
+            pat_index & (1 << 0) == (1 << 0),
+        );
+        flags.set(PageTableFlags::NO_CACHE, pat_index & (1 << 1) == (1 << 1));
+        flags.set(PageTableFlags::HUGE_PAGE, pat_index & (1 << 2) == (1 << 2));
+
+        super::memory::set_page_flags(page, flags);
+        current = unsafe { current.add(page.size() as _) };
+        if current > end {
+            break;
+        }
     }
-
-    println!("[FRAMEBUFFER] initialized");
 }
 
 #[doc(hidden)]

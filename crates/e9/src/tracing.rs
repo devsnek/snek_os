@@ -1,16 +1,20 @@
-extern crate alloc;
-
-use alloc::format;
-
 use tracing::field::{Field, Visit};
-use tracing::Subscriber;
+use tracing::{Level, Subscriber};
 use tracing_subscriber::layer::{self, Context};
 
-pub struct Layer;
+pub struct Layer {
+    level: Level,
+}
+
+impl Layer {
+    pub fn new(level: Level) -> Self {
+        Self { level }
+    }
+}
 
 impl<S: Subscriber> layer::Layer<S> for Layer {
-    fn enabled(&self, _metadata: &tracing::Metadata<'_>, _ctx: Context<'_, S>) -> bool {
-        true
+    fn enabled(&self, meta: &tracing::Metadata<'_>, _ctx: Context<'_, S>) -> bool {
+        meta.level() <= &self.level
     }
 
     fn on_new_span(
@@ -23,16 +27,13 @@ impl<S: Subscriber> layer::Layer<S> for Layer {
 
     fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
         let meta = event.metadata();
+        let target = meta.target();
         let level = meta.level();
-        let origin = meta
-            .file()
-            .and_then(|file| meta.line().map(|ln| format!("{}:{}", file, ln)))
-            .unwrap_or_default();
 
         static LOCK: spin::Mutex<()> = spin::Mutex::new(());
         let _guard = LOCK.lock();
 
-        crate::print!("{level} {origin}");
+        crate::print!("{level} {target}");
 
         struct Visitor;
         impl Visit for Visitor {

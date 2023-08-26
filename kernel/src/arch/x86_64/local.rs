@@ -92,4 +92,6 @@ pub fn init() {
         GsBase::write(VirtAddr::new(ptr as u64));
         KernelGsBase::write(VirtAddr::new(ptr as u64));
     }
+
+    println!("[LOCAL] initialized");
 }

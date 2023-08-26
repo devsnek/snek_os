@@ -1,12 +1,13 @@
 BUILD ?= debug
-PROFILE ?= $(BUILD)
+TARGET ?= x86_64-unknown-none
+CARGO_PROFILE ?= $(BUILD)
 
 ifeq ($(BUILD), debug)
-	PROFILE = dev
+	CARGO_PROFILE = dev
 endif
 
-KERNEL = target/x86_64-unknown-none/$(BUILD)/snek_kernel
-ISO = out/$(BUILD)/snek_os.iso
+KERNEL = target/$(TARGET)/$(BUILD)/snek_kernel
+ISO = out/$(TARGET)/$(BUILD)/snek_os.iso
 LIMINE = out/limine/limine
 OVMF = out/ovmf/OVMF.fd
 
@@ -23,12 +24,12 @@ $(LIMINE):
 	cd out/limine && $(MAKE)
 
 $(KERNEL): FORCE
-	cargo build --profile $(PROFILE) --package snek_kernel --target x86_64-unknown-none
+	cargo build --profile $(CARGO_PROFILE) --package snek_kernel --target $(TARGET)
 
 $(ISO): $(KERNEL) $(OVMF) $(LIMINE)
 	rm -rf out/iso_root
 	mkdir -p out/iso_root
-	mkdir -p out/$(BUILD)
+	mkdir -p out/$(TARGET)/$(BUILD)
 	cp $(KERNEL) out/iso_root/kernel.elf
 	cp kernel/limine.cfg out/iso_root/
 	cp -v out/limine/limine-bios.sys out/limine/limine-bios-cd.bin out/limine/limine-uefi-cd.bin out/iso_root/
@@ -52,7 +53,7 @@ fmt:
 	cargo fmt
 
 clippy:
-	cargo clippy --package snek_kernel --target x86_64-unknown-none
+	cargo clippy --package snek_kernel --target $(TARGET)
 
 run: $(ISO)
 	qemu-system-x86_64 \
@@ -63,5 +64,6 @@ run: $(ISO)
 		-smp 4 \
 		-m 2G \
 		-device qemu-xhci \
+		-device e1000 \
 		-bios $(OVMF) \
 		-drive file=$(ISO),format=raw

@@ -45,8 +45,6 @@ mod shell;
 mod task;
 
 pub fn main() -> ! {
-    debug::init();
-
     println!("Welcome to snek_os");
 
     drivers::init();

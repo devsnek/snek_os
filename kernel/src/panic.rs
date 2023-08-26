@@ -36,12 +36,12 @@ fn panic(info: &PanicInfo) -> ! {
     }
 
     if !info.can_unwind() {
+        println!("{}", info);
         println!("non-unwinding panic, halting");
         crate::arch::halt_loop();
     }
 
     let mut stack_frames = Vec::new();
-
     stack_trace(32, |frame| {
         stack_frames.push(frame);
     });

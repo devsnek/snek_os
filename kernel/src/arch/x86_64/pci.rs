@@ -5,7 +5,11 @@ use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
 use pci_types::{
     Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader,
 };
-use x86_64::VirtAddr;
+use x86_64::{
+    instructions::port::Port,
+    structures::port::{PortRead, PortWrite},
+    VirtAddr,
+};
 
 struct Resolver<'a> {
     regions: PciConfigRegions<'a, AcpiAllocator>,
@@ -114,9 +118,12 @@ impl<'a> Resolver<'a> {
                         bars
                     };
 
+                    let (interrupt_pin, interrupt_line) = endpoint_header.interrupt(self);
+
                     self.devices.insert(
                         address,
                         PciDevice {
+                            physical_offset: self.offset as _,
                             address,
                             class,
                             sub_class,
@@ -127,6 +134,8 @@ impl<'a> Resolver<'a> {
                             sub_device_id,
                             revision,
                             bars,
+                            interrupt_pin,
+                            interrupt_line,
                         },
                     );
                 }
@@ -146,7 +155,9 @@ impl<'a> Resolver<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct PciDevice {
+    pub physical_offset: usize,
     pub address: PciAddress,
     pub class: u8,
     pub sub_class: u8,
@@ -157,7 +168,12 @@ pub struct PciDevice {
     pub sub_device_id: u16,
     pub revision: u8,
     pub bars: [Option<Bar>; 6],
+    pub interrupt_pin: u8,
+    pub interrupt_line: u8,
 }
+
+const PCI_CONFIG_ADDRESS_PORT: u16 = 0xCF8;
+const PCI_CONFIG_DATA_PORT: u16 = 0xCFC;
 
 impl PciDevice {
     pub fn name(&self) -> String {
@@ -176,6 +192,37 @@ impl PciDevice {
                 .to_owned()
         }
     }
+
+    fn address(&self, offset: u32) -> u32 {
+        ((self.address.bus() as u32) << 16)
+            | ((self.address.device() as u32) << 11)
+            | ((self.address.function() as u32) << 8)
+            | (offset & 0xFC)
+            | 0x80000000
+    }
+
+    unsafe fn read<T: PciReadWrite>(&self, offset: u32) -> T {
+        Port::new(PCI_CONFIG_ADDRESS_PORT).write(self.address(offset));
+
+        let value = Port::new(PCI_CONFIG_DATA_PORT).read();
+        T::read(offset, value)
+    }
+
+    unsafe fn write<T: PciReadWrite>(&self, offset: u32, value: T) {
+        Port::new(PCI_CONFIG_ADDRESS_PORT).write(self.address(offset));
+        let current = self.read::<u32>(offset);
+        Port::new(PCI_CONFIG_DATA_PORT).write(T::write(offset, current, value));
+    }
+
+    pub fn enable_mmio(&self) {
+        let command = unsafe { self.read::<u16>(0x04) };
+        unsafe { self.write::<u16>(0x04, command | (1 << 1)) }
+    }
+
+    pub fn enable_bus_mastering(&self) {
+        let command = unsafe { self.read::<u16>(0x04) };
+        unsafe { self.write::<u16>(0x04, command | (1 << 2)) }
+    }
 }
 
 static mut DEVICES: BTreeMap<PciAddress, PciDevice> = BTreeMap::new();
@@ -192,18 +239,48 @@ pub fn init(regions: PciConfigRegions<AcpiAllocator>, physical_offset: u64) {
     };
 
     let mut devices = resolver.resolve();
-    for (address, device) in &devices {
-        println!(
-            "  PCI {address} {:04x}:{:04x} {}",
-            device.vendor_id,
-            device.device_id,
-            device.name()
-        );
-    }
 
     unsafe {
         DEVICES.append(&mut devices);
     }
 
     println!("[PCI] initialized");
+}
+
+trait PciReadWrite: PortRead + PortWrite + Sized {
+    fn read(offset: u32, value: u32) -> Self;
+    fn write(offset: u32, current: u32, value: Self) -> u32;
+}
+
+impl PciReadWrite for u8 {
+    fn read(offset: u32, value: u32) -> Self {
+        (value >> offset) as _
+    }
+
+    fn write(offset: u32, current: u32, value: Self) -> u32 {
+        let mask = !(0xffu32 << offset);
+        (current & mask) | ((value as u32 & 0xff) << offset)
+    }
+}
+
+impl PciReadWrite for u16 {
+    fn read(offset: u32, value: u32) -> Self {
+        (value >> offset) as _
+    }
+
+    fn write(offset: u32, current: u32, value: Self) -> u32 {
+        let noffset = (offset & 0b11) * 8;
+        let mask = !(0xffffu32 << noffset);
+        (current & mask) | ((value as u32 & 0xffff) << noffset)
+    }
+}
+
+impl PciReadWrite for u32 {
+    fn read(_offset: u32, value: u32) -> Self {
+        value
+    }
+
+    fn write(_offset: u32, _current: u32, value: Self) -> u32 {
+        value
+    }
 }

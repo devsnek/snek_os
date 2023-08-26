@@ -33,6 +33,21 @@ pub fn init(
     )
 }
 
+pub fn pci_route_pin(device: u16, function: u16, pin: u8) {
+    let acpi_tables =
+        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _) }.unwrap();
+
+    let dsdt = acpi_tables.dsdt().unwrap();
+    let table =
+        unsafe { core::slice::from_raw_parts(dsdt.address as *mut u8, dsdt.length as usize) };
+
+    let mut aml = AmlContext::new(Box::new(AmlHandler), DebugVerbosity::None);
+    aml.parse_table(table).unwrap();
+    aml.initialize_objects().unwrap();
+
+    // find_bus(d);
+}
+
 pub fn shutdown() {
     let acpi_tables =
         unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _) }.unwrap();
@@ -46,6 +61,7 @@ pub fn shutdown() {
 
     let mut aml = AmlContext::new(Box::new(AmlHandler), DebugVerbosity::None);
     aml.parse_table(table).unwrap();
+    aml.initialize_objects().unwrap();
     let name = AmlName::from_str("\\_S5").unwrap();
     if let Ok(AmlValue::Package(s5)) = aml.namespace.get_by_path(&name) {
         if let AmlValue::Integer(value) = s5[0] {

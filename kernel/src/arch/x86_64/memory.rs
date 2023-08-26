@@ -2,6 +2,7 @@ use super::stack_allocator::StackAllocator;
 use limine::{MemmapEntry, MemoryMapEntryType, NonNullPtr};
 use spin::Mutex;
 use x86_64::{
+    registers::model_specific::Msr,
     structures::paging::{
         page::{PageRange, Size4KiB},
         FrameAllocator, Mapper, OffsetPageTable, Page, PageSize, PageTable, PageTableFlags,
@@ -28,6 +29,8 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static [NonNullPtr<Me
     let frame_allocator = unsafe { BootInfoFrameAllocator::init(memory_regions) };
 
     let _ = FRAME_ALLOCATOR.lock().insert(frame_allocator);
+
+    init_pat();
 
     println!("[MEMORY] initialized");
 }
@@ -170,4 +173,98 @@ pub fn map_address(phys: PhysAddr, size: usize) -> VirtAddr {
             end: Page::containing_address(VirtAddr::new(0xFFFF_FFFF_FFFF_FFFF)),
         },
     )
+}
+
+pub fn translate_addr(addr: VirtAddr) -> Option<PhysAddr> {
+    let mut binding = super::memory::MAPPER.lock();
+    let mapper = binding.as_mut().unwrap();
+
+    mapper.translate_addr(addr)
+}
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+enum MemoryCachingType {
+    Uncacheable = 0x00,
+    WriteCombining = 0x01,
+    WriteThrough = 0x04,
+    WriteProtected = 0x05,
+    WriteBack = 0x06,
+    UncachedMinus = 0x07,
+}
+
+mycelium_bitfield::bitfield! {
+    struct PageAttributeTable<u64> {
+        const SLOT_0 = 3;
+        const _RESERVED_0 = 5;
+        const SLOT_1 = 3;
+        const _RESERVED_1 = 5;
+        const SLOT_2 = 3;
+        const _RESERVED_2 = 5;
+        const SLOT_3 = 3;
+        const _RESERVED_3 = 5;
+        const SLOT_4 = 3;
+        const _RESERVED_4 = 5;
+        const SLOT_5 = 3;
+        const _RESERVED_5 = 5;
+        const SLOT_6 = 3;
+        const _RESERVED_6 = 5;
+        const SLOT_7 = 3;
+        const _RESERVED_7 = 5;
+    }
+}
+
+fn init_pat() {
+    let pat = PageAttributeTable::new()
+        .with(
+            PageAttributeTable::SLOT_0,
+            MemoryCachingType::WriteBack as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_1,
+            MemoryCachingType::WriteThrough as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_2,
+            MemoryCachingType::Uncacheable as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_3,
+            MemoryCachingType::Uncacheable as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_4,
+            MemoryCachingType::WriteProtected as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_5,
+            MemoryCachingType::WriteCombining as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_6,
+            MemoryCachingType::UncachedMinus as _,
+        )
+        .with(
+            PageAttributeTable::SLOT_7,
+            MemoryCachingType::UncachedMinus as _,
+        );
+
+    let mut msr = Msr::new(0x277);
+    unsafe {
+        msr.write(pat.into());
+    }
+}
+
+pub(crate) fn set_page_flags<T: PageSize>(page: Page<T>, flags: PageTableFlags)
+    where OffsetPageTable<'static>: Mapper<T>
+{
+    let mut binding = super::memory::MAPPER.lock();
+    let mapper = binding.as_mut().unwrap();
+
+    unsafe {
+        if let Err(err) = mapper.update_flags(page, flags) {
+            drop(binding);
+            panic!("{:?}", err);
+        }
+    }
 }

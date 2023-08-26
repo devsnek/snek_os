@@ -31,14 +31,14 @@ unsafe extern "C" fn _start() -> ! {
 fn start() -> ! {
     e9::println!("hey there :)");
 
-    init_sse();
-
     if let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() {
         if framebuffer_response.framebuffer_count > 0 {
             let framebuffer = &framebuffer_response.framebuffers()[0];
             framebuffer::init(framebuffer);
         }
     }
+
+    init_sse();
 
     gdt::init();
 
@@ -78,6 +78,8 @@ fn start() -> ! {
     }
 
     local::init();
+
+    framebuffer::update_pages();
 
     crate::main();
 }
@@ -146,10 +148,11 @@ fn init_sse() {
     }
 }
 
+pub use acpi::shutdown;
 pub use framebuffer::_print;
 pub use local::Local;
-// pub use pci::get_devices as get_pci_devices;
-pub use acpi::shutdown;
+pub use memory::translate_addr;
+pub use pci::{get_devices as get_pci_devices, PciDevice};
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

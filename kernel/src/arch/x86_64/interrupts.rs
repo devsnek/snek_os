@@ -15,6 +15,8 @@ use x86_64::{
     PhysAddr,
 };
 
+// mod table;
+
 const PS2_KEYBOARD_IRQ: u8 = 1;
 const PIT_TIMER_IRQ: u8 = 2;
 const PS2_MOUSE_IRQ: u8 = 12;

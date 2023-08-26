@@ -11,28 +11,27 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = ["size_16", "regular", "unicode-basic-latin", "unicode-specials"] }
-mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "f173c18b05543f3bf1abd7b5e3b2bfe32214e5d3" }
-maitake = { git = "https://github.com/devsnek/mycelium.git", rev = "e23b02810a9586fe268868c01c36c1d4d6dfa37f" }
+mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
+maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false }
 i8042 = { path = "../crates/i8042" }
 pci-ids = "0.2"
-pci_types = "0.3"
+pci_types = "0.5"
 rustc-demangle = "0.1"
 snalloc = { path = "../crates/snalloc" }
 limine = "0.1"
-e9 = { path = "../crates/e9", features = ["tracing"] }
+e9 = { path = "../crates/e9" }
 embedded-graphics = "0.8"
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr"] }
-tracing = { version = "0.1", default-features = false }
-tracing-subscriber = { version = "0.3", default-features = false }
 pin-project = "1.1"
+bitflags = "2.4"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
 pic8259 = "0.10"
 acpi = { git = "https://github.com/rust-osdev/acpi.git", rev = "e41036d3749a5a901e62cdf62011c735bf283e9c" }
-aml = "0.16.4"
+aml = "0.16"
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"

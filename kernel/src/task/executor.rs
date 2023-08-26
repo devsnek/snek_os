@@ -194,16 +194,16 @@ impl Executor {
 }
 
 #[pin_project]
-pub struct CatchUnwind<Fut> {
+pub struct CatchUnwind<F> {
     #[pin]
-    future: Fut,
+    future: F,
 }
 
-impl<Fut> Future for CatchUnwind<Fut>
+impl<F> Future for CatchUnwind<F>
 where
-    Fut: Future + UnwindSafe,
+    F: Future + UnwindSafe,
 {
-    type Output = Result<Fut::Output, Box<dyn Any + Send>>;
+    type Output = Result<F::Output, Box<dyn Any + Send>>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let f = self.project().future;
