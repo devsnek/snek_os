@@ -1,78 +1,70 @@
-use super::stack_allocator::StackAllocator;
+use super::{pci::PciDevice, stack_allocator::StackAllocator};
 use acpi::{
-    fadt::Fadt, mcfg::PciConfigRegions, platform::PlatformInfo, AcpiHandler, AcpiTables,
-    PhysicalMapping,
+    mcfg::PciConfigRegions,
+    platform::PlatformInfo,
+    sdt::{SdtHeader, Signature},
+    AcpiHandler, AcpiTables, PhysicalMapping,
 };
-use aml::{AmlContext, AmlName, AmlValue, DebugVerbosity};
+use alloc::sync::Arc;
+use conquer_once::spin::OnceCell;
+use core::convert::TryInto;
 use x86_64::{instructions::port::Port, VirtAddr};
 
 pub type AcpiAllocator = StackAllocator<2048>;
 
 static mut RSDP_ADDRESS: VirtAddr = VirtAddr::zero();
+static mut ACPI_TABLES: OnceCell<AcpiTables<AcpiHandlerImpl>> = OnceCell::uninit();
 
-pub fn init(
-    allocator: &AcpiAllocator,
-    rsdp_address: VirtAddr,
-) -> (
-    PlatformInfo<'_, AcpiAllocator>,
-    PciConfigRegions<'_, AcpiAllocator>,
-) {
-    unsafe {
-        RSDP_ADDRESS = rsdp_address;
-    }
-
-    let acpi_tables = allocator.own(
-        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _) }.unwrap(),
-    );
-
-    let pci_regions = PciConfigRegions::new_in(acpi_tables, allocator).unwrap();
-
-    (
-        acpi_tables.platform_info_in(allocator).unwrap(),
-        pci_regions,
-    )
+fn get_tables() -> &'static AcpiTables<AcpiHandlerImpl> {
+    unsafe { ACPI_TABLES.get().unwrap() }
 }
 
-pub fn pci_route_pin(device: u16, function: u16, pin: u8) {
-    let acpi_tables =
-        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _) }.unwrap();
+pub fn early_init(
+    allocator: &AcpiAllocator,
+    rsdp_address: VirtAddr,
+) -> PlatformInfo<'_, &AcpiAllocator> {
+    unsafe {
+        RSDP_ADDRESS = rsdp_address;
+        ACPI_TABLES
+            .try_init_once(|| {
+                AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _).unwrap()
+            })
+            .unwrap();
+    }
 
-    let dsdt = acpi_tables.dsdt().unwrap();
-    let table =
-        unsafe { core::slice::from_raw_parts(dsdt.address as *mut u8, dsdt.length as usize) };
+    println!("[ACPI] early initialized");
 
-    let mut aml = AmlContext::new(Box::new(AmlHandler), DebugVerbosity::None);
-    aml.parse_table(table).unwrap();
-    aml.initialize_objects().unwrap();
+    get_tables().platform_info_in(allocator).unwrap()
+}
 
-    // find_bus(d);
+pub fn late_init() {
+    let lai_host = Arc::new(LaiHost);
+    lai::init(lai_host);
+
+    lai::set_acpi_revision(get_tables().revision() as _);
+    lai::create_namespace();
+
+    println!("[ACPI] late initialized");
+}
+
+pub fn get_pci_config_regions() -> PciConfigRegions<'static, &'static alloc::alloc::Global> {
+    PciConfigRegions::new_in(get_tables(), &alloc::alloc::Global).unwrap()
+}
+
+pub fn pci_route_pin(device: &PciDevice) -> u8 {
+    lai::pci_route_pin(
+        device.address.segment(),
+        device.address.bus(),
+        device.address.device(),
+        device.address.function(),
+        device.interrupt_pin,
+    )
+    .unwrap()
+    .base as _
 }
 
 pub fn shutdown() {
-    let acpi_tables =
-        unsafe { AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _) }.unwrap();
-
-    let fadt = acpi_tables.find_table::<Fadt>().unwrap();
-    let pm1a_ctl = fadt.pm1a_control_block().unwrap().address;
-
-    let dsdt = acpi_tables.dsdt().unwrap();
-    let table =
-        unsafe { core::slice::from_raw_parts(dsdt.address as *mut u8, dsdt.length as usize) };
-
-    let mut aml = AmlContext::new(Box::new(AmlHandler), DebugVerbosity::None);
-    aml.parse_table(table).unwrap();
-    aml.initialize_objects().unwrap();
-    let name = AmlName::from_str("\\_S5").unwrap();
-    if let Ok(AmlValue::Package(s5)) = aml.namespace.get_by_path(&name) {
-        if let AmlValue::Integer(value) = s5[0] {
-            let slp_typa = value as u16;
-            let slp_en: u16 = 1 << 13;
-
-            unsafe {
-                Port::<u16>::new(pm1a_ctl as u16).write(slp_typa | slp_en);
-            }
-        }
-    }
+    lai::enter_sleep(lai::SleepState::Shutdown).unwrap();
 }
 
 #[derive(Clone)]
@@ -99,105 +91,88 @@ impl AcpiHandler for AcpiHandlerImpl {
     }
 }
 
-struct AmlHandler;
+struct LaiHost;
 
-impl aml::Handler for AmlHandler {
-    fn read_u8(&self, address: usize) -> u8 {
-        unsafe { core::ptr::read(address as *mut u8) }
+impl LaiHost {
+    fn pci_address(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> usize {
+        let mcfg = get_tables().find_table::<acpi::mcfg::Mcfg>().unwrap();
+
+        let region = mcfg
+            .entries()
+            .iter()
+            .find(|region| {
+                region.pci_segment_group == segment
+                    && (region.bus_number_start..=region.bus_number_end).contains(&bus)
+            })
+            .unwrap();
+
+        let addr = region.base_address as usize
+            + ((((bus - region.bus_number_start) as usize) << 20)
+                | ((device as usize) << 15)
+                | ((function as usize) << 12));
+
+        addr + (offset as usize)
     }
-    fn read_u16(&self, address: usize) -> u16 {
-        unsafe { core::ptr::read(address as *mut u16) }
+}
+
+impl lai::Host for LaiHost {
+    fn log(&self, level: lai::LogLevel, message: &str) {
+        println!("[LAI {level:?}] {message}");
     }
-    fn read_u32(&self, address: usize) -> u32 {
-        unsafe { core::ptr::read(address as *mut u32) }
+
+    fn scan(&self, signature: &str, index: usize) -> *mut u8 {
+        let aml_table_ptr = match signature {
+            "DSDT" => get_tables().dsdt().map(|aml| aml.address).unwrap_or(0),
+            _ => {
+                let signature = Signature::from_raw(signature.as_bytes().try_into().unwrap());
+                get_tables()
+                    .find_sdt(signature, index)
+                    .map(|aml| aml.address)
+                    .unwrap_or(0)
+            }
+        };
+
+        if aml_table_ptr == 0 {
+            core::ptr::null_mut()
+        } else {
+            let sdt_ptr = aml_table_ptr - core::mem::size_of::<SdtHeader>();
+            sdt_ptr as _
+        }
     }
-    fn read_u64(&self, address: usize) -> u64 {
-        unsafe { core::ptr::read(address as *mut u64) }
+
+    fn outb(&self, port: u16, value: u8) {
+        unsafe { Port::new(port).write(value) }
     }
-    fn write_u8(&mut self, _address: usize, _value: u8) {
-        unimplemented!()
+
+    fn outw(&self, port: u16, value: u16) {
+        unsafe { Port::new(port).write(value) }
     }
-    fn write_u16(&mut self, _address: usize, _value: u16) {
-        unimplemented!()
+
+    fn outd(&self, port: u16, value: u32) {
+        unsafe { Port::new(port).write(value) }
     }
-    fn write_u32(&mut self, _address: usize, _value: u32) {
-        unimplemented!()
+
+    fn inb(&self, port: u16) -> u8 {
+        unsafe { Port::new(port).read() }
     }
-    fn write_u64(&mut self, _address: usize, _value: u64) {
-        unimplemented!()
+
+    fn inw(&self, port: u16) -> u16 {
+        unsafe { Port::new(port).read() }
     }
-    fn read_io_u8(&self, _port: u16) -> u8 {
-        unimplemented!()
+
+    fn ind(&self, port: u16) -> u32 {
+        unsafe { Port::new(port).read() }
     }
-    fn read_io_u16(&self, _port: u16) -> u16 {
-        unimplemented!()
+
+    fn pci_readb(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16) -> u8 {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *const u8).read_volatile() }
     }
-    fn read_io_u32(&self, _port: u16) -> u32 {
-        unimplemented!()
+
+    fn pci_readw(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16) -> u16 {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *const u16).read_volatile() }
     }
-    fn write_io_u8(&self, _port: u16, _value: u8) {
-        unimplemented!()
-    }
-    fn write_io_u16(&self, _port: u16, _value: u16) {
-        unimplemented!()
-    }
-    fn write_io_u32(&self, _port: u16, _value: u32) {
-        unimplemented!()
-    }
-    fn read_pci_u8(&self, _segment: u16, _bus: u8, _device: u8, _function: u8, _offset: u16) -> u8 {
-        unimplemented!()
-    }
-    fn read_pci_u16(
-        &self,
-        _segment: u16,
-        _bus: u8,
-        _device: u8,
-        _function: u8,
-        _offset: u16,
-    ) -> u16 {
-        unimplemented!()
-    }
-    fn read_pci_u32(
-        &self,
-        _segment: u16,
-        _bus: u8,
-        _device: u8,
-        _function: u8,
-        _offset: u16,
-    ) -> u32 {
-        unimplemented!()
-    }
-    fn write_pci_u8(
-        &self,
-        _segment: u16,
-        _bus: u8,
-        _device: u8,
-        _function: u8,
-        _offset: u16,
-        _value: u8,
-    ) {
-        unimplemented!()
-    }
-    fn write_pci_u16(
-        &self,
-        _segment: u16,
-        _bus: u8,
-        _device: u8,
-        _function: u8,
-        _offset: u16,
-        _value: u16,
-    ) {
-        unimplemented!()
-    }
-    fn write_pci_u32(
-        &self,
-        _segment: u16,
-        _bus: u8,
-        _device: u8,
-        _function: u8,
-        _offset: u16,
-        _value: u32,
-    ) {
-        unimplemented!()
+
+    fn pci_readd(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16) -> u32 {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *const u32).read_volatile() }
     }
 }

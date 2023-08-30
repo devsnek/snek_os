@@ -15,8 +15,6 @@ use x86_64::{
     PhysAddr,
 };
 
-// mod table;
-
 const PS2_KEYBOARD_IRQ: u8 = 1;
 const PIT_TIMER_IRQ: u8 = 2;
 const PS2_MOUSE_IRQ: u8 = 12;
@@ -265,7 +263,7 @@ fn init_lapic() {
     println!("[LAPIC] initialized");
 }
 
-fn init_ioapic(apic_info: &ApicInfo<AcpiAllocator>) {
+fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
     let io_apic_virtual_address =
         super::memory::map_address(PhysAddr::new(apic_info.io_apics[0].address as u64), 4096);
 
@@ -358,7 +356,7 @@ fn init_timing() {
     println!("[TIMING] initialized");
 }
 
-pub fn init(acpi_platform_info: &PlatformInfo<AcpiAllocator>) {
+pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
     IDT.load();
 
     let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else {

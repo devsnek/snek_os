@@ -35,40 +35,60 @@ fn panic(info: &PanicInfo) -> ! {
         IN_PANIC = true;
     }
 
-    if !info.can_unwind() {
-        println!("{}", info);
-        println!("non-unwinding panic, halting");
-        crate::arch::halt_loop();
-    }
-
     let mut stack_frames = Vec::new();
     stack_trace(32, |frame| {
         stack_frames.push(frame);
     });
 
+    if !info.can_unwind() {
+        println!("UNHANDLED (no-unwind) {}", info);
+        print_stack_frames(&stack_frames);
+        crate::arch::halt_loop();
+    }
+
     let code = unwinding::panic::begin_panic(Box::new(PanicData {
         info: format!("{}", info),
-        stack_frames,
+        stack_frames: stack_frames.clone(),
     }));
-    println!("failed to panic, error {}", code.0);
+    println!(
+        "UNHANDLED ({}) {}",
+        match code {
+            UnwindReasonCode::NO_REASON => "no reason",
+            UnwindReasonCode::FOREIGN_EXCEPTION_CAUGHT => "foreign exception caught",
+            UnwindReasonCode::FATAL_PHASE1_ERROR => "fatal phase 1 error",
+            UnwindReasonCode::FATAL_PHASE2_ERROR => "fatal phase 2 error",
+            UnwindReasonCode::NORMAL_STOP => "normal stop",
+            UnwindReasonCode::END_OF_STACK => "end of stack",
+            UnwindReasonCode::HANDLER_FOUND => "handler found",
+            UnwindReasonCode::INSTALL_CONTEXT => "install context",
+            UnwindReasonCode::CONTINUE_UNWIND => "continue unwind",
+            _ => "??",
+        },
+        info
+    );
+    print_stack_frames(&stack_frames);
     crate::arch::halt_loop();
+}
+
+fn print_stack_frames(stack_frames: &[StackFrame]) {
+    for frame in stack_frames {
+        if let Some((f_addr, f_name)) = frame.function {
+            println!(
+                "  at 0x{:016x} {:#}+0x{:x}",
+                frame.address,
+                demangle(f_name),
+                frame.address - f_addr
+            );
+        } else {
+            println!("  at 0x{:016x}", frame.address);
+        }
+    }
 }
 
 pub fn inspect(e: &(dyn Any + Send)) {
     if let Some(data) = e.downcast_ref::<PanicData>() {
         println!("{}", data.info);
-        for frame in &data.stack_frames {
-            if let Some((f_addr, f_name)) = frame.function {
-                println!(
-                    "  at 0x{:016x} {:#}+0x{:x}",
-                    frame.address,
-                    demangle(f_name),
-                    frame.address - f_addr
-                );
-            } else {
-                println!("  at 0x{:016x}", frame.address);
-            }
-        }
+        print_stack_frames(&data.stack_frames);
     } else {
         println!("external panic, halting");
     }
@@ -86,7 +106,8 @@ where
         }
     }
 }
-#[derive(Debug)]
+
+#[derive(Debug, Clone)]
 pub struct StackFrame {
     pub address: usize,
     pub function: Option<(usize, &'static str)>,

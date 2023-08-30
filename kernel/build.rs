@@ -1,5 +1,6 @@
 fn main() {
     println!("cargo:rustc-link-arg=-T./kernel/linker.ld");
+    println!("cargo:rustc-link-arg=--no-dynamic-linker");
     println!("cargo:rerun-if-changed=linker.ld");
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
