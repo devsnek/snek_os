@@ -26,7 +26,7 @@ embedded-graphics = "0.8"
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
 pin-project = "1.1"
 bitflags = "2.4"
-lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "6cd30f07d3c7fd9c812b592175562d0a40919669" }
+lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "deb8958513a41d38f9991d1b9b7f2900ba13989e" }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"

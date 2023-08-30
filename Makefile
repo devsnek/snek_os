@@ -61,7 +61,6 @@ run: $(ISO)
 		-enable-kvm \
 		-M q35 \
 		-debugcon /dev/stdout \
-		--no-shutdown --no-reboot \
 		-smp 4 \
 		-m 2G \
 		-device qemu-xhci \

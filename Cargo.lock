@@ -364,7 +364,7 @@ dependencies = [
 [[package]]
 name = "lai"
 version = "0.1.0"
-source = "git+https://github.com/devsnek/lai-rs.git?rev=6cd30f07d3c7fd9c812b592175562d0a40919669#6cd30f07d3c7fd9c812b592175562d0a40919669"
+source = "git+https://github.com/devsnek/lai-rs.git?rev=deb8958513a41d38f9991d1b9b7f2900ba13989e#deb8958513a41d38f9991d1b9b7f2900ba13989e"
 dependencies = [
  "bindgen",
  "cc",

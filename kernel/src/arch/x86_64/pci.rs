@@ -55,15 +55,27 @@ impl<'a> ConfigRegionAccess for Resolver<'a> {
 
 impl<'a> Resolver<'a> {
     fn resolve(mut self) -> BTreeMap<PciAddress, PciDevice> {
-        if PciHeader::new(PciAddress::new(0, 0, 0, 0)).has_multiple_functions(&self) {
-            for i in 0..8 {
-                self.scan_bus(0, i);
-            }
-        } else {
-            self.scan_bus(0, 0);
-        }
+        let segments = self
+            .regions
+            .iter()
+            .map(|region| region.segment_group)
+            .collect::<Vec<_>>();
+
+        segments.into_iter().for_each(|segment| {
+            self.scan_segment(segment);
+        });
 
         self.devices
+    }
+
+    fn scan_segment(&mut self, segment: u16) {
+        if PciHeader::new(PciAddress::new(segment, 0, 0, 0)).has_multiple_functions(self) {
+            for i in 0..8 {
+                self.scan_bus(segment, i);
+            }
+        } else {
+            self.scan_bus(segment, 0);
+        }
     }
 
     fn scan_bus(&mut self, segment: u16, bus: u8) {

@@ -44,6 +44,8 @@ pub fn late_init() {
     lai::set_acpi_revision(get_tables().revision() as _);
     lai::create_namespace();
 
+    lai::enable_acpi(lai::PICMethod::APIC);
+
     println!("[ACPI] late initialized");
 }
 
@@ -95,19 +97,13 @@ struct LaiHost;
 
 impl LaiHost {
     fn pci_address(&self, segment: u16, bus: u8, device: u8, function: u8, offset: u16) -> usize {
-        let mcfg = get_tables().find_table::<acpi::mcfg::Mcfg>().unwrap();
-
-        let region = mcfg
-            .entries()
+        let region = get_pci_config_regions()
             .iter()
-            .find(|region| {
-                region.pci_segment_group == segment
-                    && (region.bus_number_start..=region.bus_number_end).contains(&bus)
-            })
+            .find(|region| region.segment_group == segment && region.bus_range.contains(&bus))
             .unwrap();
 
-        let addr = region.base_address as usize
-            + ((((bus - region.bus_number_start) as usize) << 20)
+        let addr = region.physical_address as usize
+            + ((((bus - region.bus_range.start()) as usize) << 20)
                 | ((device as usize) << 15)
                 | ((function as usize) << 12));
 
@@ -174,5 +170,29 @@ impl lai::Host for LaiHost {
 
     fn pci_readd(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16) -> u32 {
         unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *const u32).read_volatile() }
+    }
+
+    fn pci_writeb(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16, value: u8) {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *mut u8).write_volatile(value) }
+    }
+
+    fn pci_writew(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16, value: u16) {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *mut u16).write_volatile(value) }
+    }
+
+    fn pci_writed(&self, seg: u16, bus: u8, slot: u8, fun: u8, offset: u16, value: u32) {
+        unsafe { (self.pci_address(seg, bus, slot, fun, offset) as *mut u32).write_volatile(value) }
+    }
+
+    fn map(&self, address: usize, _count: usize) -> *mut u8 {
+        address as _
+    }
+
+    fn unmap(&self, _address: usize, _count: usize) {}
+
+    fn sleep(&self, _ms: u64) {}
+
+    fn timer(&self) -> u64 {
+        unimplemented!()
     }
 }
