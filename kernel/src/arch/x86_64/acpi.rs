@@ -1,5 +1,6 @@
 use super::{pci::PciDevice, stack_allocator::StackAllocator};
 use acpi::{
+    fadt::Fadt,
     mcfg::PciConfigRegions,
     platform::PlatformInfo,
     sdt::{SdtHeader, Signature},
@@ -44,9 +45,22 @@ pub fn late_init() {
     lai::set_acpi_revision(get_tables().revision() as _);
     lai::create_namespace();
 
+    let fadt = get_tables().find_table::<Fadt>().unwrap();
+    core::mem::forget(super::interrupts::set_interrupt_static(
+        fadt.sci_interrupt as _,
+        handle_interrupt,
+    ));
+
     lai::enable_acpi(lai::PICMethod::APIC);
 
     println!("[ACPI] late initialized");
+}
+
+fn handle_interrupt() {
+    let event = lai::get_sci_event();
+    if event.contains(lai::SciEvent::POWER_BUTTON) {
+        shutdown();
+    }
 }
 
 pub fn get_pci_config_regions() -> PciConfigRegions<'static, &'static alloc::alloc::Global> {
@@ -63,6 +77,11 @@ pub fn pci_route_pin(device: &PciDevice) -> u8 {
     )
     .unwrap()
     .base as _
+}
+
+pub fn get_century_register() -> u8 {
+    let fadt = get_tables().find_table::<Fadt>().unwrap();
+    fadt.century
 }
 
 pub fn shutdown() {
@@ -113,7 +132,7 @@ impl LaiHost {
 
 impl lai::Host for LaiHost {
     fn log(&self, level: lai::LogLevel, message: &str) {
-        println!("[LAI {level:?}] {message}");
+        e9::println!("[LAI {level:?}] {message}");
     }
 
     fn scan(&self, signature: &str, index: usize) -> *mut u8 {

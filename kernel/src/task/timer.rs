@@ -1,7 +1,7 @@
 use core::time::Duration;
 use maitake::time::{set_global_timer, Timer};
 
-pub const TIMER_INTERVAL: Duration = Duration::from_millis(10);
+pub const TIMER_INTERVAL: Duration = Duration::from_millis(1);
 
 pub static TIMER: Timer = Timer::new(TIMER_INTERVAL);
 

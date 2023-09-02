@@ -8,6 +8,12 @@ pub struct StackAllocator<const SIZE: usize> {
     inner: Mutex<StackAllocatorInner<SIZE>>,
 }
 
+impl<const SIZE: usize> core::fmt::Debug for StackAllocator<SIZE> {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "StackAllocator {{ size: {SIZE} }}")
+    }
+}
+
 struct StackAllocatorInner<const SIZE: usize> {
     memory: [u8; SIZE],
     current: usize,

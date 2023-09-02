@@ -1,20 +1,14 @@
 use crate::arch::PciDevice;
-use conquer_once::spin::OnceCell;
 
+pub mod e1000;
 pub mod i8042;
 
-static INITIALIZED: OnceCell<Vec<Box<dyn Driver>>> = OnceCell::uninit();
+type DriverInit = fn(&PciDevice) -> bool;
 
-pub trait Driver: Send + Sync {}
-
-type DriverInit = fn(&PciDevice) -> Option<Box<dyn Driver>>;
-
-static DRIVER_INITS: &[DriverInit] = &[];
+static DRIVER_INITS: &[DriverInit] = &[e1000::init];
 
 pub fn init() {
     i8042::init();
-
-    let mut devices = vec![];
 
     for (address, device) in crate::arch::get_pci_devices() {
         println!(
@@ -25,12 +19,9 @@ pub fn init() {
         );
 
         for init in DRIVER_INITS {
-            if let Some(driver) = init(device) {
-                devices.push(driver);
+            if init(device) {
                 break;
             }
         }
     }
-
-    INITIALIZED.try_init_once(|| devices).unwrap();
 }

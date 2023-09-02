@@ -26,7 +26,6 @@ use core::{
     any::Any,
     cell::Cell,
     future::Future,
-    panic::UnwindSafe,
     pin::Pin,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     task::{Context, Poll},
@@ -94,9 +93,7 @@ impl Executor {
             id,
             scheduler,
             running: AtomicBool::new(false),
-            rng: rand_xoshiro::Xoroshiro128PlusPlus::from_seed(
-                <rand_xoshiro::Xoroshiro128PlusPlus as SeedableRng>::Seed::default(),
-            ),
+            rng: rand_xoshiro::Xoroshiro128PlusPlus::seed_from_u64(crate::arch::rand().unwrap()),
         }
     }
 
@@ -201,7 +198,7 @@ pub struct CatchUnwind<F> {
 
 impl<F> Future for CatchUnwind<F>
 where
-    F: Future + UnwindSafe,
+    F: Future,
 {
     type Output = Result<F::Output, Box<dyn Any + Send>>;
 
@@ -219,7 +216,7 @@ where
 
 pub fn spawn<F>(future: F) -> JoinHandle<<CatchUnwind<F> as Future>::Output>
 where
-    F: Future + UnwindSafe + Send + 'static,
+    F: Future + Send + 'static,
     F::Output: Send + 'static,
 {
     let future = CatchUnwind { future };

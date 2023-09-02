@@ -15,22 +15,39 @@ use x86_64::{
     PhysAddr,
 };
 
-const PS2_KEYBOARD_IRQ: u8 = 1;
-const PIT_TIMER_IRQ: u8 = 2;
-const PS2_MOUSE_IRQ: u8 = 12;
-
 const PIC_1_OFFSET: u8 = 32;
 const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 
-const IOAPIC_START: u8 = PIC_2_OFFSET + 8;
-const IOAPIC_PS2_KEYBOARD: usize = IOAPIC_START as usize + PS2_KEYBOARD_IRQ as usize;
-const IOAPIC_PIT_TIMER: usize = IOAPIC_START as usize + PIT_TIMER_IRQ as usize;
-const IOAPIC_PS2_MOUSE: usize = IOAPIC_START as usize + PS2_MOUSE_IRQ as usize;
+const IOAPIC_START: u8 = 32;
 
 const NUM_VECTORS: usize = 256;
 const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
 const LOCAL_APIC_TIMER: usize = NUM_VECTORS - 2;
 const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
+
+macro_rules! prologue {
+    () => {
+        unsafe { GS::swap() };
+    };
+}
+
+macro_rules! epilogue {
+    () => {
+        unsafe {
+            get_lapic().end_of_interrupt();
+
+            GS::swap();
+        }
+    };
+}
+
+pub enum InterruptHandler {
+    None,
+    Static(fn()),
+    Dynamic(Box<dyn Fn()>),
+}
+
+static mut INTERRUPT_HANDLERS: [InterruptHandler; 224] = [const { InterruptHandler::None }; 224];
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -52,27 +69,256 @@ lazy_static! {
         idt.general_protection_fault.set_handler_fn(general_protection_fault_handler);
         idt.alignment_check.set_handler_fn(alignment_check_handler);
 
-        idt[IOAPIC_PS2_KEYBOARD].set_handler_fn(keyboard_interrupt_handler);
-        idt[IOAPIC_PIT_TIMER].set_handler_fn(pit_timer_interrupt_handler);
-        idt[IOAPIC_PS2_MOUSE].set_handler_fn(mouse_interrupt_handler);
+        macro_rules! handler {
+            ($i:expr) => {{
+                extern "x86-interrupt" fn handle_interrupt(_stack_frame: InterruptStackFrame) {
+                    prologue!();
+
+                    unsafe {
+                        match &INTERRUPT_HANDLERS[$i - 32] {
+                            InterruptHandler::None => {}
+                            InterruptHandler::Static(f) => f(),
+                            InterruptHandler::Dynamic(f) => f(),
+                        }
+                    }
+
+                    epilogue!();
+                }
+
+                idt[$i].set_handler_fn(handle_interrupt);
+            }}
+        }
+
+        handler!(32);
+        handler!(33);
+        handler!(34);
+        handler!(35);
+        handler!(36);
+        handler!(37);
+        handler!(38);
+        handler!(39);
+        handler!(40);
+        handler!(41);
+        handler!(42);
+        handler!(43);
+        handler!(44);
+        handler!(45);
+        handler!(46);
+        handler!(47);
+        handler!(48);
+        handler!(49);
+        handler!(50);
+        handler!(51);
+        handler!(52);
+        handler!(53);
+        handler!(54);
+        handler!(55);
+        handler!(56);
+        handler!(57);
+        handler!(58);
+        handler!(59);
+        handler!(60);
+        handler!(61);
+        handler!(62);
+        handler!(63);
+        handler!(64);
+        handler!(65);
+        handler!(66);
+        handler!(67);
+        handler!(68);
+        handler!(69);
+        handler!(70);
+        handler!(71);
+        handler!(72);
+        handler!(73);
+        handler!(74);
+        handler!(75);
+        handler!(76);
+        handler!(77);
+        handler!(78);
+        handler!(79);
+        handler!(80);
+        handler!(81);
+        handler!(82);
+        handler!(83);
+        handler!(84);
+        handler!(85);
+        handler!(86);
+        handler!(87);
+        handler!(88);
+        handler!(89);
+        handler!(90);
+        handler!(91);
+        handler!(92);
+        handler!(93);
+        handler!(94);
+        handler!(95);
+        handler!(96);
+        handler!(97);
+        handler!(98);
+        handler!(99);
+        handler!(100);
+        handler!(101);
+        handler!(102);
+        handler!(103);
+        handler!(104);
+        handler!(105);
+        handler!(106);
+        handler!(107);
+        handler!(108);
+        handler!(109);
+        handler!(110);
+        handler!(111);
+        handler!(112);
+        handler!(113);
+        handler!(114);
+        handler!(115);
+        handler!(116);
+        handler!(117);
+        handler!(118);
+        handler!(119);
+        handler!(120);
+        handler!(121);
+        handler!(122);
+        handler!(123);
+        handler!(124);
+        handler!(125);
+        handler!(126);
+        handler!(127);
+        handler!(128);
+        handler!(129);
+        handler!(130);
+        handler!(131);
+        handler!(132);
+        handler!(133);
+        handler!(134);
+        handler!(135);
+        handler!(136);
+        handler!(137);
+        handler!(138);
+        handler!(139);
+        handler!(140);
+        handler!(141);
+        handler!(142);
+        handler!(143);
+        handler!(144);
+        handler!(145);
+        handler!(146);
+        handler!(147);
+        handler!(148);
+        handler!(149);
+        handler!(150);
+        handler!(151);
+        handler!(152);
+        handler!(153);
+        handler!(154);
+        handler!(155);
+        handler!(156);
+        handler!(157);
+        handler!(158);
+        handler!(159);
+        handler!(160);
+        handler!(161);
+        handler!(162);
+        handler!(163);
+        handler!(164);
+        handler!(165);
+        handler!(166);
+        handler!(167);
+        handler!(168);
+        handler!(169);
+        handler!(170);
+        handler!(171);
+        handler!(172);
+        handler!(173);
+        handler!(174);
+        handler!(175);
+        handler!(176);
+        handler!(177);
+        handler!(178);
+        handler!(179);
+        handler!(180);
+        handler!(181);
+        handler!(182);
+        handler!(183);
+        handler!(184);
+        handler!(185);
+        handler!(186);
+        handler!(187);
+        handler!(188);
+        handler!(189);
+        handler!(190);
+        handler!(191);
+        handler!(192);
+        handler!(193);
+        handler!(194);
+        handler!(195);
+        handler!(196);
+        handler!(197);
+        handler!(198);
+        handler!(199);
+        handler!(200);
+        handler!(201);
+        handler!(202);
+        handler!(203);
+        handler!(204);
+        handler!(205);
+        handler!(206);
+        handler!(207);
+        handler!(208);
+        handler!(209);
+        handler!(210);
+        handler!(211);
+        handler!(212);
+        handler!(213);
+        handler!(214);
+        handler!(215);
+        handler!(216);
+        handler!(217);
+        handler!(218);
+        handler!(219);
+        handler!(220);
+        handler!(221);
+        handler!(222);
+        handler!(223);
+        handler!(224);
+        handler!(225);
+        handler!(226);
+        handler!(227);
+        handler!(228);
+        handler!(229);
+        handler!(230);
+        handler!(231);
+        handler!(232);
+        handler!(233);
+        handler!(234);
+        handler!(235);
+        handler!(236);
+        handler!(237);
+        handler!(238);
+        handler!(239);
+        handler!(240);
+        handler!(241);
+        handler!(242);
+        handler!(243);
+        handler!(244);
+        handler!(245);
+        handler!(246);
+        handler!(247);
+        handler!(248);
+        handler!(249);
+        handler!(250);
+        handler!(251);
+        handler!(252);
+        handler!(253);
+        handler!(254);
+        handler!(255);
 
         idt[LOCAL_APIC_ERROR].set_handler_fn(error_interrupt_handler);
         idt[LOCAL_APIC_TIMER].set_handler_fn(apic_timer_interrupt_handler);
         idt[LOCAL_APIC_SPURIOUS].set_handler_fn(spurious_interrupt_handler);
 
         idt
-    };
-}
-
-macro_rules! prologue {
-    () => {
-        unsafe { GS::swap() };
-    };
-}
-
-macro_rules! epilogue {
-    () => {
-        unsafe { GS::swap() }
     };
 }
 
@@ -166,9 +412,6 @@ extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFra
     prologue!();
 
     println!("ERROR: {:#?}", stack_frame);
-    unsafe {
-        end_of_interrupt();
-    }
 
     epilogue!();
 }
@@ -176,20 +419,10 @@ extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFra
 extern "x86-interrupt" fn apic_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     prologue!();
 
-    crate::task::timer::on_tick();
-    unsafe {
-        end_of_interrupt();
-    }
-
-    epilogue!();
-}
-
-extern "x86-interrupt" fn pit_timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    prologue!();
-
-    super::pit::on_tick();
-    unsafe {
-        end_of_interrupt();
+    // timer interrupt wakes all cores but we don't want to tick more than once.
+    if super::get_pid() == 0 {
+        crate::task::timer::on_tick();
+        super::time::on_tick();
     }
 
     epilogue!();
@@ -198,40 +431,7 @@ extern "x86-interrupt" fn pit_timer_interrupt_handler(_stack_frame: InterruptSta
 extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStackFrame) {
     prologue!();
 
-    unsafe {
-        end_of_interrupt();
-    }
-
     epilogue!();
-}
-
-extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    prologue!();
-
-    crate::drivers::i8042::interrupt(i8042::Irq::Irq1);
-
-    unsafe {
-        end_of_interrupt();
-    }
-
-    epilogue!();
-}
-
-extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    prologue!();
-
-    crate::drivers::i8042::interrupt(i8042::Irq::Irq12);
-
-    unsafe {
-        end_of_interrupt();
-    }
-
-    epilogue!();
-}
-
-#[inline(always)]
-unsafe fn end_of_interrupt() {
-    get_lapic().end_of_interrupt();
 }
 
 static mut LAPIC_ADDRESS: usize = 0;
@@ -264,35 +464,32 @@ fn init_lapic() {
 }
 
 fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
-    let io_apic_virtual_address =
-        super::memory::map_address(PhysAddr::new(apic_info.io_apics[0].address as u64), 4096);
+    for io_apic_info in apic_info.io_apics.iter() {
+        let io_apic_virtual_address =
+            super::memory::map_address(PhysAddr::new(io_apic_info.address as u64), 4096);
 
-    let mut ioapic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
+        let mut ioapic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
 
-    unsafe {
-        ioapic.init(IOAPIC_START);
-    }
-
-    for i in 0..16 {
-        let mut entry = RedirectionTableEntry::default();
-        entry.set_mode(IrqMode::Fixed);
-        entry.set_flags(IrqFlags::LEVEL_TRIGGERED | IrqFlags::LOW_ACTIVE | IrqFlags::MASKED);
-        entry.set_vector(IOAPIC_START + i);
-        let dest = if i == PS2_MOUSE_IRQ || i == PS2_KEYBOARD_IRQ {
-            0
-        } else {
-            LOCAL_APIC_SPURIOUS
-        };
-        entry.set_dest(dest as u8);
         unsafe {
-            ioapic.set_table_entry(i, entry);
+            ioapic.init(IOAPIC_START);
         }
-    }
 
-    unsafe {
-        ioapic.enable_irq(PS2_MOUSE_IRQ);
-        ioapic.enable_irq(PIT_TIMER_IRQ);
-        ioapic.enable_irq(PS2_KEYBOARD_IRQ);
+        for i in 0..unsafe { ioapic.max_table_entry() } {
+            let mut entry = RedirectionTableEntry::default();
+            entry.set_mode(IrqMode::Fixed);
+            entry.set_flags(IrqFlags::LEVEL_TRIGGERED | IrqFlags::LOW_ACTIVE | IrqFlags::MASKED);
+            entry.set_vector(IOAPIC_START + i);
+            entry.set_dest(if i == 2 { LOCAL_APIC_SPURIOUS as u8 } else { 0 });
+            unsafe {
+                ioapic.set_table_entry(i, entry);
+            }
+        }
+
+        for i in 0..unsafe { ioapic.max_table_entry() } {
+            unsafe {
+                ioapic.enable_irq(i);
+            }
+        }
     }
 
     println!("[IOAPIC] initialized");
@@ -306,12 +503,16 @@ fn timer_frequency_hz() -> u32 {
         .and_then(|hypervisor| hypervisor.apic_frequency())
     {
         let frequency_hz = undivided_freq_khz / 1000 / 16;
-        return frequency_hz;
+        if frequency_hz > 0 {
+            return frequency_hz;
+        }
     }
 
     if let Some(undivided_freq_hz) = cpuid.get_tsc_info().map(|tsc| tsc.nominal_frequency()) {
         let frequency_hz = undivided_freq_hz / 16;
-        return frequency_hz;
+        if frequency_hz > 0 {
+            return frequency_hz;
+        }
     }
 
     let mut lapic = get_lapic();
@@ -337,7 +538,7 @@ fn timer_frequency_hz() -> u32 {
 }
 
 fn init_timing() {
-    let interval = core::time::Duration::from_millis(10);
+    let interval = core::time::Duration::from_millis(1);
     let timer_frequency_hz = timer_frequency_hz();
     let ticks_per_ms = timer_frequency_hz / 1000;
 
@@ -357,16 +558,14 @@ fn init_timing() {
 }
 
 pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
-    IDT.load();
-
     let InterruptModel::Apic(ref apic_info) = acpi_platform_info.interrupt_model else {
         panic!("unsupported interrupt model")
     };
 
+    IDT.load();
+
     unsafe {
-        LAPIC_ADDRESS =
-            super::memory::map_address(PhysAddr::new(apic_info.local_apic_address), 4096).as_u64()
-                as _;
+        LAPIC_ADDRESS = apic_info.local_apic_address as _;
     }
     init_lapic();
 
@@ -385,4 +584,34 @@ pub fn init_smp() {
     init_lapic();
     init_timing();
     x86_64::instructions::interrupts::enable();
+}
+
+pub fn set_interrupt_static(gsi: u8, f: fn()) -> InterruptGuard {
+    set_interrupt(gsi, InterruptHandler::Static(f))
+}
+
+pub fn set_interrupt_dyn(gsi: u8, f: Box<dyn Fn()>) -> InterruptGuard {
+    set_interrupt(gsi, InterruptHandler::Dynamic(f))
+}
+
+#[must_use]
+pub struct InterruptGuard {
+    gsi: u8,
+}
+
+impl Drop for InterruptGuard {
+    fn drop(&mut self) {
+        unsafe {
+            INTERRUPT_HANDLERS[self.gsi as usize] = InterruptHandler::None;
+        }
+    }
+}
+
+fn set_interrupt(gsi: u8, h: InterruptHandler) -> InterruptGuard {
+    // TODO: iterate ISOs
+    let gsi = if gsi == 0 { 2 } else { gsi };
+    unsafe {
+        INTERRUPT_HANDLERS[gsi as usize] = h;
+    }
+    InterruptGuard { gsi }
 }

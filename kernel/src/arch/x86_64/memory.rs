@@ -178,3 +178,10 @@ pub fn translate_virt_addr(addr: VirtAddr) -> Option<PhysAddr> {
 
     mapper.translate_addr(addr)
 }
+
+pub fn translate_phys_addr(addr: PhysAddr) -> VirtAddr {
+    let mut binding = super::memory::MAPPER.lock();
+    let mapper = binding.as_mut().unwrap();
+
+    mapper.phys_offset() + addr.as_u64()
+}

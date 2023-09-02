@@ -59,11 +59,13 @@ clippy:
 run: $(ISO)
 	qemu-system-x86_64 \
 		-enable-kvm \
+		-cpu host \
 		-M q35 \
 		-debugcon /dev/stdout \
 		-smp 4 \
-		-m 2G \
+		-m 4G \
+		-rtc base=utc,clock=host \
 		-device qemu-xhci \
-		-device e1000 \
+		-netdev user,id=u1 -device e1000,netdev=u1 \
 		-bios $(OVMF) \
 		-drive file=$(ISO),format=raw

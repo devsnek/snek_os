@@ -9,9 +9,8 @@ fn write_byte(b: u8) {
     }
     unsafe {
         core::arch::asm!(r#"
-        mov al, {}
         out 0e9h, al
-        "#, in(reg_byte) b);
+        "#, in("al") b);
     }
 }
 
@@ -21,8 +20,7 @@ pub fn _print(args: core::fmt::Arguments) {
     unsafe {
         core::arch::asm!(r#"
         in al, 0e9h
-        mov al, {}
-        "#, out(reg_byte) b);
+        "#, out("al") b);
     }
     if b != 0xe9 {
         return;

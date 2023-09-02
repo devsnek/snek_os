@@ -15,18 +15,18 @@ mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f50
 maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false }
-i8042 = { path = "../crates/i8042" }
 pci-ids = "0.2"
 pci_types = "0.5"
 rustc-demangle = "0.1"
 snalloc = { path = "../crates/snalloc" }
 limine = "0.1"
-e9 = { path = "../crates/e9" }
 embedded-graphics = "0.8"
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
 pin-project = "1.1"
 bitflags = "2.4"
-lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "deb8958513a41d38f9991d1b9b7f2900ba13989e" }
+lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
+smoltcp = { version = "0.10", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ethernet", "socket-tcp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns"] }
+chrono = { version = "0.4", default-features = false }
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
@@ -36,6 +36,9 @@ os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"
 xmas-elf = "0.9"
+cmos = { path = "../crates/cmos" }
+i8042 = { path = "../crates/i8042" }
+e9 = { path = "../crates/e9" }
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

@@ -14,6 +14,8 @@
 #![feature(inline_const)]
 #![feature(panic_can_unwind)]
 #![feature(core_panic)]
+#![feature(strict_provenance)]
+#![feature(trait_upcasting)]
 
 #[macro_use]
 extern crate lazy_static;
@@ -40,6 +42,7 @@ use prelude::*;
 mod debug;
 mod arch;
 mod drivers;
+mod net;
 mod panic;
 mod shell;
 mod task;

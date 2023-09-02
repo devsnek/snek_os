@@ -30,12 +30,14 @@ const BASE_FREQUENCY_HZ: usize = 1193180;
 const TICKS_PER_MS: usize = BASE_FREQUENCY_HZ / 1000;
 
 lazy_static! {
-    pub static ref PIT: Mutex<Pit> = Mutex::new(Pit::new());
+    pub static ref PIT: Mutex<Pit> = {
+        core::mem::forget(super::interrupts::set_interrupt_static(0, on_tick));
+        Mutex::new(Pit::new())
+    };
 }
 
 pub static SLEEPING: AtomicBool = AtomicBool::new(false);
 
-#[inline(always)]
 pub fn on_tick() {
     let _was_sleeping = super::pit::SLEEPING
         .compare_exchange(true, false, Ordering::AcqRel, Ordering::Acquire)

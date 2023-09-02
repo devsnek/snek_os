@@ -8,12 +8,13 @@ mod memory;
 mod pci;
 mod pit;
 mod stack_allocator;
+mod time;
 
 use limine::{
     FramebufferRequest, HhdmRequest, KernelAddressRequest, KernelFileRequest, MemmapRequest,
     RsdpRequest, SmpInfo, SmpRequest,
 };
-use x86_64::VirtAddr;
+use x86_64::{instructions::random::RdRand, registers::model_specific::Msr, VirtAddr};
 
 static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 static HHDM: HhdmRequest = HhdmRequest::new(0);
@@ -39,6 +40,8 @@ fn start() -> ! {
             framebuffer::init(framebuffer);
         }
     }
+
+    set_pid(0);
 
     gdt::init();
 
@@ -76,6 +79,8 @@ fn start() -> ! {
     allocator::init();
 
     acpi::late_init();
+
+    time::init();
 
     local::init();
 
@@ -118,6 +123,8 @@ extern "C" fn ap_entry(boot_info: *const SmpInfo) -> ! {
 fn start_smp(boot_info: &SmpInfo) -> ! {
     init_sse();
 
+    set_pid(boot_info.processor_id as _);
+
     gdt::init_smp(unsafe {
         BOOT_INFO.as_mut().unwrap()[boot_info.processor_id as usize]
             .take()
@@ -143,17 +150,35 @@ fn init_sse() {
             mov rax, cr4
             or ax, 3 << 9		  // set CR4.OSFXSR and CR4.OSXMMEXCPT at the same time
             mov cr4, rax
-        "
+        ",
+            out("rax") _,
         );
     }
+}
+
+fn set_pid(pid: u64) {
+    let mut msr = Msr::new(0xc0000103);
+    unsafe {
+        msr.write(pid);
+    }
+}
+
+pub fn get_pid() -> u64 {
+    let mut pid;
+    unsafe {
+        asm!("rdpid {}", out(reg) pid);
+    }
+    pid
 }
 
 pub use acpi::pci_route_pin;
 pub use acpi::shutdown;
 pub use framebuffer::_print;
+pub use interrupts::{set_interrupt_dyn, set_interrupt_static, InterruptGuard};
 pub use local::Local;
-pub use memory::translate_virt_addr;
+pub use memory::{translate_phys_addr, translate_virt_addr};
 pub use pci::{get_devices as get_pci_devices, PciDevice};
+pub use time::now;
 
 #[inline(always)]
 pub fn halt_loop() -> ! {
@@ -169,3 +194,7 @@ pub fn enable_interrupts_and_halt() {
 
 pub use x86_64::instructions::interrupts::disable as disable_interrupts;
 pub use x86_64::instructions::interrupts::without_interrupts;
+
+pub fn rand() -> Option<u64> {
+    RdRand::new()?.get_u64()
+}

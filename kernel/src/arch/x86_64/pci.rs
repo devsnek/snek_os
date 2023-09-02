@@ -114,6 +114,7 @@ impl<'a> Resolver<'a> {
                         let mut skip_next = false;
                         for i in 0..6 {
                             if skip_next {
+                                skip_next = false;
                                 continue;
                             }
 

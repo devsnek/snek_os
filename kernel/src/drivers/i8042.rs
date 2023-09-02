@@ -1,9 +1,5 @@
 use conquer_once::spin::OnceCell;
-use core::{
-    future::Future,
-    pin::Pin,
-    task::{Context, Poll},
-};
+use core::{future::poll_fn, task::Poll};
 use crossbeam_queue::ArrayQueue;
 use futures_util::task::AtomicWaker;
 use i8042::{Change, DecodedKey, Driver8042, Irq, MouseState};
@@ -69,14 +65,17 @@ pub fn init() {
 
     KEY_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
     MOUSE_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
+
+    core::mem::forget(crate::arch::set_interrupt_static(1, || {
+        interrupt(i8042::Irq::Irq1);
+    }));
+    core::mem::forget(crate::arch::set_interrupt_static(12, || {
+        interrupt(i8042::Irq::Irq12);
+    }));
 }
 
-struct KeyFuture;
-
-impl Future for KeyFuture {
-    type Output = Option<DecodedKey>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+pub async fn next_key() -> Option<DecodedKey> {
+    poll_fn(|cx| {
         let Ok(queue) = KEY_QUEUE.try_get() else {
             return Poll::Ready(None);
         };
@@ -94,19 +93,13 @@ impl Future for KeyFuture {
             }
             None => Poll::Pending,
         }
-    }
+    })
+    .await
 }
 
-pub async fn next_key() -> Option<DecodedKey> {
-    KeyFuture.await
-}
-
-struct MouseFuture;
-
-impl Future for MouseFuture {
-    type Output = Option<MouseState>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+#[allow(unused)]
+pub async fn next_mouse_state() -> Option<MouseState> {
+    poll_fn(|cx| {
         let Ok(queue) = MOUSE_QUEUE.try_get() else {
             return Poll::Ready(None);
         };
@@ -124,9 +117,6 @@ impl Future for MouseFuture {
             }
             None => Poll::Pending,
         }
-    }
-}
-
-pub async fn next_mouse_state() -> Option<MouseState> {
-    MouseFuture.await
+    })
+    .await
 }
