@@ -1,4 +1,9 @@
-use core::{any::Any, panic::PanicInfo};
+use crate::arch::Local;
+use core::{
+    any::Any,
+    panic::PanicInfo,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 use rustc_demangle::demangle;
 use unwinding::abi::{UnwindContext, UnwindReasonCode, _Unwind_Backtrace, _Unwind_GetIP};
 use x86_64::VirtAddr;
@@ -9,7 +14,7 @@ use xmas_elf::{
     ElfFile,
 };
 
-static mut IN_PANIC: bool = false;
+static PANIC_COUNT: Local<AtomicUsize> = Local::new(|| AtomicUsize::new(0));
 static mut KERNEL_SLICE: &[u8] = &[];
 static mut KERNEL_BASE: usize = 0;
 
@@ -25,15 +30,19 @@ struct PanicData {
     stack_frames: Vec<StackFrame>,
 }
 
+impl Drop for PanicData {
+    fn drop(&mut self) {
+        PANIC_COUNT.with(|c| {
+            c.fetch_sub(1, Ordering::SeqCst);
+        });
+    }
+}
+
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
-    unsafe {
-        if IN_PANIC {
-            e9::println!("PANIC IN PANIC: {}", info);
-            println!("PANIC IN PANIC: {}", info);
-            crate::arch::halt_loop();
-        }
-        IN_PANIC = true;
+    if PANIC_COUNT.with(|c| c.fetch_add(1, Ordering::SeqCst) > 0) {
+        println!("PANIC IN PANIC: {}", info);
+        crate::arch::halt_loop();
     }
 
     let mut stack_frames = Vec::new();

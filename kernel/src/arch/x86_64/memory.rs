@@ -1,5 +1,6 @@
 use super::stack_allocator::StackAllocator;
 use limine::{MemmapEntry, MemoryMapEntryType, NonNullPtr};
+use os_units::{Bytes, NumOfPages};
 use spin::Mutex;
 use x86_64::{
     structures::paging::{
@@ -9,8 +10,6 @@ use x86_64::{
     },
     PhysAddr, VirtAddr,
 };
-
-use os_units::{Bytes, NumOfPages};
 
 lazy_static! {
     pub static ref MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
@@ -155,6 +154,8 @@ pub fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) ->
                 .flush();
         }
     }
+
+    super::interrupts::send_flush_tlb();
 
     let page_offset = start.as_u64() % Size4KiB::SIZE;
 

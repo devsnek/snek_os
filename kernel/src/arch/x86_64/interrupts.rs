@@ -4,7 +4,7 @@ use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
 use x2apic::{
     ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry},
-    lapic::{LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
+    lapic::{IpiAllShorthand, LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
     registers::{
@@ -21,6 +21,7 @@ const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
 const IOAPIC_START: u8 = 32;
 
 const NUM_VECTORS: usize = 256;
+const LOCAL_APIC_TLB_FLUSH: usize = NUM_VECTORS - 4;
 const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
 const LOCAL_APIC_TIMER: usize = NUM_VECTORS - 2;
 const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
@@ -314,6 +315,7 @@ lazy_static! {
         handler!(254);
         handler!(255);
 
+        idt[LOCAL_APIC_TLB_FLUSH].set_handler_fn(tlb_flush_interrupt_handler);
         idt[LOCAL_APIC_ERROR].set_handler_fn(error_interrupt_handler);
         idt[LOCAL_APIC_TIMER].set_handler_fn(apic_timer_interrupt_handler);
         idt[LOCAL_APIC_SPURIOUS].set_handler_fn(spurious_interrupt_handler);
@@ -406,6 +408,14 @@ extern "x86-interrupt" fn double_fault_handler(
     prologue!();
 
     panic!("DOUBLE FAULT: {:#?}", stack_frame);
+}
+
+extern "x86-interrupt" fn tlb_flush_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
+    x86_64::instructions::tlb::flush_all();
+
+    epilogue!();
 }
 
 extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFrame) {
@@ -614,4 +624,10 @@ fn set_interrupt(gsi: u8, h: InterruptHandler) -> InterruptGuard {
         INTERRUPT_HANDLERS[gsi as usize] = h;
     }
     InterruptGuard { gsi }
+}
+
+pub fn send_flush_tlb() {
+    unsafe {
+        get_lapic().send_ipi_all(LOCAL_APIC_TLB_FLUSH as _, IpiAllShorthand::AllExcludingSelf);
+    }
 }

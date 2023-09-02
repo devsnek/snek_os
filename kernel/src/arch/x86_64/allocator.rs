@@ -42,6 +42,8 @@ pub fn lazy_map(address: VirtAddr) -> bool {
             .flush()
     };
 
+    super::interrupts::send_flush_tlb();
+
     unsafe {
         core::slice::from_raw_parts_mut(page.start_address().as_u64() as *mut u8, page.size() as _)
             .fill(0);

@@ -122,13 +122,14 @@ where
             iface.poll(timestamp, &mut device, &mut sockets);
 
             let socket = sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
-            let cx = iface.context();
 
             state = match state {
                 State::Connect if !socket.is_active() => {
                     println!("connecting");
                     let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
-                    socket.connect(cx, (ips[0], 80), local_port).unwrap();
+                    socket
+                        .connect(iface.context(), (ips[0], 80), local_port)
+                        .unwrap();
                     State::Request
                 }
                 State::Request if socket.may_send() => {
