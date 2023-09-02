@@ -29,6 +29,7 @@ struct PanicData {
 fn panic(info: &PanicInfo) -> ! {
     unsafe {
         if IN_PANIC {
+            e9::println!("PANIC IN PANIC: {}", info);
             println!("PANIC IN PANIC: {}", info);
             crate::arch::halt_loop();
         }

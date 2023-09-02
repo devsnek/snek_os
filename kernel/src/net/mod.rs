@@ -55,6 +55,8 @@ where
                     for (i, s) in config.dns_servers.iter().enumerate() {
                         println!("DNS server {}:    {}", i, s);
                     }
+
+                    break;
                 }
                 Some(socket::dhcpv4::Event::Deconfigured) => {
                     println!("DHCP lost config!");
@@ -68,91 +70,104 @@ where
 
             maitake::future::yield_now().await;
         }
-    });
 
-    /*
-    iface.update_ip_addrs(|ip_addrs| {
-        ip_addrs
-            .push(wire::IpCidr::new(wire::IpAddress::v4(10, 0, 2, 15), 24))
+        let mut dns_socket =
+            socket::dns::Socket::new(&[wire::Ipv4Address::new(1, 1, 1, 1).into()], vec![None]);
+
+        let query_handle = dns_socket
+            .start_query(iface.context(), "snek.dev", wire::DnsQueryType::A)
             .unwrap();
-    });
-    iface
-        .routes_mut()
-        .add_default_ipv4_route(wire::Ipv4Address::new(10, 0, 2, 2))
-        .unwrap();
 
-    let tcp_rx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
-    let tcp_tx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
-    let tcp_socket = socket::tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
+        let mut sockets = iface::SocketSet::new(vec![]);
+        let dns_handle = sockets.add(dns_socket);
 
-    let mut sockets = iface::SocketSet::new(vec![]);
-    let tcp_handle = sockets.add(tcp_socket);
+        let ips: Vec<_> = loop {
+            let timestamp = time::Instant::from_micros(crate::arch::now() as i64);
+            iface.poll(timestamp, &mut device, &mut sockets);
 
-    enum State {
-        Connect,
-        Request,
-        Response,
-    }
+            let socket = sockets.get_mut::<socket::dns::Socket>(dns_handle);
 
-    let mut state = State::Connect;
-
-    loop {
-        let timestamp = time::Instant::from_micros(crate::arch::now());
-        iface.poll(
-            timestamp,
-            &mut device,
-            &mut sockets,
-        );
-
-        let socket = sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
-        let cx = iface.context();
-
-        state = match state {
-            State::Connect if !socket.is_active() => {
-                println!("connecting");
-                let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
-                socket
-                    .connect(
-                        cx,
-                        (wire::Ipv4Address::new(162, 159, 135, 232), 80),
-                        local_port,
-                    )
-                    .unwrap();
-                State::Request
+            match socket.get_query_result(query_handle) {
+                Ok(results) => {
+                    break results.into_iter().collect();
+                }
+                Err(socket::dns::GetQueryResultError::Pending) => {}
+                Err(socket::dns::GetQueryResultError::Failed) => {
+                    panic!("query failed");
+                }
             }
-            State::Request if socket.may_send() => {
-                println!("sending request");
 
-                socket
-                    .send_slice(b"GET / HTTP/1.1\r\n")
-                    .expect("cannot send");
-                socket
-                    .send_slice(b"Host: discord.com\r\n")
-                    .expect("cannot send");
-                socket
-                    .send_slice(b"User-Agent: snek_os (https://github.com/devsnek/snek_os, 0.1.0)\r\n")
-                    .expect("cannot send");
-                socket
-                    .send_slice(b"Connection: close\r\n")
-                    .expect("cannot send");
-                socket.send_slice(b"\r\n").expect("cannot send");
-                State::Response
-            }
-            State::Response if socket.can_recv() => {
-                socket
-                    .recv(|data| {
-                        println!("{}", core::str::from_utf8(data).unwrap_or("(invalid utf8)"));
-                        (data.len(), ())
-                    })
-                    .unwrap();
-                State::Response
-            }
-            State::Response if !socket.may_recv() => {
-                println!("received complete response");
-                break;
-            }
-            _ => state,
+            maitake::future::yield_now().await;
         };
-    }
-    */
+
+        println!("got ips {:?}", ips);
+
+        let tcp_rx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
+        let tcp_tx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
+        let tcp_socket = socket::tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
+
+        let mut sockets = iface::SocketSet::new(vec![]);
+        let tcp_handle = sockets.add(tcp_socket);
+
+        enum State {
+            Connect,
+            Request,
+            Response,
+        }
+
+        let mut state = State::Connect;
+
+        loop {
+            let timestamp = time::Instant::from_micros(crate::arch::now() as i64);
+            iface.poll(timestamp, &mut device, &mut sockets);
+
+            let socket = sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
+            let cx = iface.context();
+
+            state = match state {
+                State::Connect if !socket.is_active() => {
+                    println!("connecting");
+                    let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
+                    socket.connect(cx, (ips[0], 80), local_port).unwrap();
+                    State::Request
+                }
+                State::Request if socket.may_send() => {
+                    println!("sending request");
+
+                    socket
+                        .send_slice(b"GET / HTTP/1.1\r\n")
+                        .expect("cannot send");
+                    socket
+                        .send_slice(b"Host: snek.dev\r\n")
+                        .expect("cannot send");
+                    socket
+                        .send_slice(
+                            b"User-Agent: snek_os (https://github.com/devsnek/snek_os, 0.1.0)\r\n",
+                        )
+                        .expect("cannot send");
+                    socket
+                        .send_slice(b"Connection: close\r\n")
+                        .expect("cannot send");
+                    socket.send_slice(b"\r\n").expect("cannot send");
+                    State::Response
+                }
+                State::Response if socket.can_recv() => {
+                    socket
+                        .recv(|data| {
+                            println!("{}", core::str::from_utf8(data).unwrap_or("(invalid utf8)"));
+                            (data.len(), ())
+                        })
+                        .unwrap();
+                    State::Response
+                }
+                State::Response if !socket.may_recv() => {
+                    println!("received complete response");
+                    break;
+                }
+                _ => state,
+            };
+
+            maitake::future::yield_now().await;
+        }
+    });
 }

@@ -159,31 +159,35 @@ impl Executor {
             return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
         }
 
-        let mut attempts = 0;
-        while attempts < MAX_STEAL_ATTEMPTS {
-            let active_cores = RUNTIME.active_cores();
+        if cfg!(feature = "work-stealing") {
+            let mut attempts = 0;
+            while attempts < MAX_STEAL_ATTEMPTS {
+                let active_cores = RUNTIME.active_cores();
 
-            if active_cores <= 1 {
-                break;
+                if active_cores <= 1 {
+                    break;
+                }
+
+                let victim_idx = self.rng.gen_range(0..active_cores);
+
+                if victim_idx == self.id {
+                    continue;
+                }
+
+                if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
+                    let num_steal =
+                        core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
+                    return victim.spawn_n(&self.scheduler, num_steal);
+                } else {
+                    attempts += 1;
+                }
             }
 
-            let victim_idx = self.rng.gen_range(0..active_cores);
-
-            if victim_idx == self.id {
-                continue;
-            }
-
-            if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
-                let num_steal =
-                    core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
-                return victim.spawn_n(&self.scheduler, num_steal);
+            if let Ok(injector) = RUNTIME.injector.try_steal() {
+                injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK)
             } else {
-                attempts += 1;
+                0
             }
-        }
-
-        if let Ok(injector) = RUNTIME.injector.try_steal() {
-            injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK)
         } else {
             0
         }

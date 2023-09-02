@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(clippy::new_without_default)]
 
 use chrono::{NaiveDate, NaiveDateTime};
 use x86_64::instructions::port::Port;

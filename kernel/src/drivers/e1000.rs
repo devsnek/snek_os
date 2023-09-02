@@ -17,11 +17,9 @@ enum Register {
     Eeprom = 0x14,
 
     ICause = 0xc0,
-    IRate = 0xc4,
     IMask = 0xd0,
 
     RCtrl = 0x100,
-    Tipg = 0x410,
     RxDescLo = 0x2800,
     RxDescHi = 0x2804,
     RxDescLen = 0x2808,
