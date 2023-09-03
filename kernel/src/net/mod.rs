@@ -1,137 +1,205 @@
-pub trait Driver: Sized + Send + Sync {
+use alloc::sync::Arc;
+use conquer_once::spin::OnceCell;
+use core::time::Duration;
+use spin::Mutex;
+
+pub trait Driver: smoltcp::phy::Device + Sized + Send + Sync {
     fn address(&self) -> smoltcp::wire::HardwareAddress;
 }
 
-pub fn register<D>(device: D)
-where
-    D: smoltcp::phy::Device + Driver + 'static,
-{
-    use smoltcp::*;
+struct InterfaceInner {
+    iface: smoltcp::iface::Interface,
+    sockets: smoltcp::iface::SocketSet<'static>,
+    dns_servers: Vec<smoltcp::wire::IpAddress>,
+}
 
-    fn set_ipv4_addr(iface: &mut iface::Interface, cidr: wire::Ipv4Cidr) {
-        iface.update_ip_addrs(|addrs| {
-            addrs.truncate(0);
-            addrs.push(wire::IpCidr::Ipv4(cidr)).unwrap();
-        });
-    }
+struct Interface<D: Driver> {
+    device: D,
+    inner: Arc<Mutex<InterfaceInner>>,
+    dhcp_handle: Option<smoltcp::iface::SocketHandle>,
+}
 
-    crate::task::spawn(async move {
-        let mut device = device;
-
-        let mut config = iface::Config::new(device.address());
+impl<D: Driver> Interface<D> {
+    fn new(mut device: D) -> Self {
+        let mut config = smoltcp::iface::Config::new(device.address());
         config.random_seed = crate::arch::rand().unwrap();
-        let now = time::Instant::from_micros(crate::arch::now() as i64);
-        let mut iface = iface::Interface::new(config, &mut device, now);
 
-        let dhcp_socket = socket::dhcpv4::Socket::new();
+        let now = smoltcp::time::Instant::from_micros(crate::arch::now() as i64);
 
-        let mut sockets = iface::SocketSet::new(vec![]);
+        let iface = smoltcp::iface::Interface::new(config, &mut device, now);
+        let mut sockets = smoltcp::iface::SocketSet::new(vec![]);
+
+        let dhcp_socket = smoltcp::socket::dhcpv4::Socket::new();
         let dhcp_handle = sockets.add(dhcp_socket);
 
-        loop {
-            let timestamp = time::Instant::from_micros(crate::arch::now() as i64);
-            iface.poll(timestamp, &mut device, &mut sockets);
-
-            let socket = sockets.get_mut::<socket::dhcpv4::Socket>(dhcp_handle);
-
-            let event = socket.poll();
-
-            match event {
-                None => {}
-                Some(socket::dhcpv4::Event::Configured(config)) => {
-                    println!("DHCP config acquired!");
-
-                    println!("IP address:      {}", config.address);
-                    set_ipv4_addr(&mut iface, config.address);
-
-                    if let Some(router) = config.router {
-                        println!("Default gateway: {}", router);
-                        iface.routes_mut().add_default_ipv4_route(router).unwrap();
-                    } else {
-                        println!("Default gateway: None");
-                        iface.routes_mut().remove_default_ipv4_route();
-                    }
-
-                    for (i, s) in config.dns_servers.iter().enumerate() {
-                        println!("DNS server {}:    {}", i, s);
-                    }
-
-                    break;
-                }
-                Some(socket::dhcpv4::Event::Deconfigured) => {
-                    println!("DHCP lost config!");
-                    set_ipv4_addr(
-                        &mut iface,
-                        wire::Ipv4Cidr::new(wire::Ipv4Address::UNSPECIFIED, 0),
-                    );
-                    iface.routes_mut().remove_default_ipv4_route();
-                }
-            }
-
-            maitake::future::yield_now().await;
-        }
-
-        let mut dns_socket =
-            socket::dns::Socket::new(&[wire::Ipv4Address::new(1, 1, 1, 1).into()], vec![None]);
-
-        let query_handle = dns_socket
-            .start_query(iface.context(), "snek.dev", wire::DnsQueryType::A)
-            .unwrap();
-
-        let mut sockets = iface::SocketSet::new(vec![]);
-        let dns_handle = sockets.add(dns_socket);
-
-        let ips: Vec<_> = loop {
-            let timestamp = time::Instant::from_micros(crate::arch::now() as i64);
-            iface.poll(timestamp, &mut device, &mut sockets);
-
-            let socket = sockets.get_mut::<socket::dns::Socket>(dns_handle);
-
-            match socket.get_query_result(query_handle) {
-                Ok(results) => {
-                    break results.into_iter().collect();
-                }
-                Err(socket::dns::GetQueryResultError::Pending) => {}
-                Err(socket::dns::GetQueryResultError::Failed) => {
-                    panic!("query failed");
-                }
-            }
-
-            maitake::future::yield_now().await;
+        let inner = InterfaceInner {
+            iface,
+            sockets,
+            dns_servers: vec![],
         };
 
-        println!("got ips {:?}", ips);
-
-        let tcp_rx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
-        let tcp_tx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
-        let tcp_socket = socket::tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
-
-        let mut sockets = iface::SocketSet::new(vec![]);
-        let tcp_handle = sockets.add(tcp_socket);
-
-        enum State {
-            Connect,
-            Request,
-            Response,
+        Self {
+            device,
+            inner: Arc::new(Mutex::new(inner)),
+            dhcp_handle: Some(dhcp_handle),
         }
+    }
 
-        let mut state = State::Connect;
+    fn poll_dhcp(&mut self) {
+        let Some(dhcp_handle) = self.dhcp_handle else {
+            return;
+        };
+        let inner = &mut *self.inner.lock();
+        let socket = inner
+            .sockets
+            .get_mut::<smoltcp::socket::dhcpv4::Socket>(dhcp_handle);
 
+        let event = socket.poll();
+
+        match event {
+            None => {}
+            Some(smoltcp::socket::dhcpv4::Event::Configured(config)) => {
+                println!("DHCP config acquired!");
+
+                println!("IP address:      {}", config.address);
+                inner.iface.update_ip_addrs(|addrs| {
+                    addrs.truncate(0);
+                    addrs
+                        .push(smoltcp::wire::IpCidr::Ipv4(config.address))
+                        .unwrap();
+                });
+
+                if let Some(router) = config.router {
+                    println!("Default gateway: {}", router);
+                    inner
+                        .iface
+                        .routes_mut()
+                        .add_default_ipv4_route(router)
+                        .unwrap();
+                } else {
+                    println!("Default gateway: None");
+                    inner.iface.routes_mut().remove_default_ipv4_route();
+                }
+
+                for (i, s) in config.dns_servers.into_iter().enumerate() {
+                    println!("DNS server {}:    {}", i, s);
+                    inner.dns_servers.push(s.into());
+                }
+            }
+            Some(smoltcp::socket::dhcpv4::Event::Deconfigured) => {
+                println!("DHCP lost config!");
+                inner.iface.update_ip_addrs(|addrs| {
+                    addrs.truncate(0);
+                    addrs
+                        .push(smoltcp::wire::IpCidr::Ipv4(smoltcp::wire::Ipv4Cidr::new(
+                            smoltcp::wire::Ipv4Address::UNSPECIFIED,
+                            0,
+                        )))
+                        .unwrap();
+                });
+                inner.iface.routes_mut().remove_default_ipv4_route();
+                inner.dns_servers.truncate(0);
+            }
+        }
+    }
+
+    async fn run(&mut self) {
         loop {
-            let timestamp = time::Instant::from_micros(crate::arch::now() as i64);
-            iface.poll(timestamp, &mut device, &mut sockets);
+            let timestamp = {
+                let inner = &mut *self.inner.lock();
+                let timestamp = smoltcp::time::Instant::from_micros(crate::arch::now() as i64);
+                inner
+                    .iface
+                    .poll(timestamp, &mut self.device, &mut inner.sockets);
+                timestamp
+            };
 
-            let socket = sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
+            self.poll_dhcp();
+
+            let delay = {
+                let inner = &mut *self.inner.lock();
+                inner
+                    .iface
+                    .poll_delay(timestamp, &inner.sockets)
+                    .map(|d| Duration::from_micros(d.micros()))
+            };
+            maitake::time::sleep(delay.unwrap_or_default()).await;
+        }
+    }
+}
+
+static DEFAULT_DRIVER: OnceCell<Arc<Mutex<InterfaceInner>>> = OnceCell::uninit();
+
+pub fn register<D>(device: D)
+where
+    D: Driver + 'static,
+{
+    let mut interface = Interface::new(device);
+    let inner2 = interface.inner.clone();
+    DEFAULT_DRIVER.try_init_once(|| inner2).unwrap();
+
+    crate::task::spawn(async move {
+        interface.run().await;
+    });
+
+    crate::task::spawn(async {
+        let ip = get_ips("snek.dev".to_owned()).await[0];
+        println!("got ip {:?}", ip);
+        http_get(ip).await;
+    });
+}
+
+async fn http_get(ip: smoltcp::wire::IpAddress) {
+    use smoltcp::*;
+
+    let tcp_rx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
+    let tcp_tx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
+
+    let tcp_handle = {
+        let mut inner = DEFAULT_DRIVER.get().unwrap().lock();
+        let tcp_socket = socket::tcp::Socket::new(tcp_rx_buffer, tcp_tx_buffer);
+        inner.sockets.add(tcp_socket)
+    };
+
+    // CONNECT
+
+    {
+        let inner = &mut *DEFAULT_DRIVER.get().unwrap().lock();
+        let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
+        let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
+        socket
+            .connect(inner.iface.context(), (ip, 80), local_port)
+            .unwrap();
+    }
+    core::future::poll_fn(|cx| {
+        use core::task::Poll;
+        let mut inner = DEFAULT_DRIVER.get().unwrap().lock();
+        let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
+        if socket.is_open() {
+            Poll::Ready(())
+        } else {
+            socket.register_send_waker(cx.waker());
+            Poll::Pending
+        }
+    })
+    .await;
+
+    // SEND
+
+    // TODO: convert other states to poll_fn
+    enum State {
+        Request,
+        Response,
+    }
+
+    let mut state = State::Request;
+
+    loop {
+        {
+            let inner = &mut *DEFAULT_DRIVER.get().unwrap().lock();
+            let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
 
             state = match state {
-                State::Connect if !socket.is_active() => {
-                    println!("connecting");
-                    let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
-                    socket
-                        .connect(iface.context(), (ips[0], 80), local_port)
-                        .unwrap();
-                    State::Request
-                }
                 State::Request if socket.may_send() => {
                     println!("sending request");
 
@@ -167,8 +235,49 @@ where
                 }
                 _ => state,
             };
-
-            maitake::future::yield_now().await;
         }
-    });
+
+        maitake::future::yield_now().await;
+    }
+}
+
+async fn get_ips(name: String) -> Vec<smoltcp::wire::IpAddress> {
+    use smoltcp::*;
+
+    loop {
+        let inner = DEFAULT_DRIVER.get().unwrap().lock();
+        if inner.dns_servers.is_empty() {
+            drop(inner);
+            maitake::time::sleep(Duration::from_millis(50)).await;
+        } else {
+            break;
+        }
+    }
+
+    let mut inner = DEFAULT_DRIVER.get().unwrap().lock();
+    let mut dns_socket = socket::dns::Socket::new(&inner.dns_servers, vec![]);
+
+    let query_handle = dns_socket
+        .start_query(inner.iface.context(), &name, wire::DnsQueryType::A)
+        .unwrap();
+
+    let dns_handle = inner.sockets.add(dns_socket);
+    drop(inner);
+
+    core::future::poll_fn(|cx| {
+        use core::task::Poll;
+        let mut inner = DEFAULT_DRIVER.get().unwrap().lock();
+        let socket = inner.sockets.get_mut::<socket::dns::Socket>(dns_handle);
+        match socket.get_query_result(query_handle) {
+            Err(socket::dns::GetQueryResultError::Pending) => {
+                socket.register_query_waker(query_handle, cx.waker());
+                Poll::Pending
+            }
+            Ok(results) => Poll::Ready(results.into_iter().collect::<Vec<_>>()),
+            Err(socket::dns::GetQueryResultError::Failed) => {
+                panic!("query failed");
+            }
+        }
+    })
+    .await
 }
