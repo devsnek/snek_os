@@ -66,12 +66,20 @@ pub fn init() {
     KEY_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
     MOUSE_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();
 
-    core::mem::forget(crate::arch::set_interrupt_static(1, || {
-        interrupt(i8042::Irq::Irq1);
-    }));
-    core::mem::forget(crate::arch::set_interrupt_static(12, || {
-        interrupt(i8042::Irq::Irq12);
-    }));
+    core::mem::forget(crate::arch::set_interrupt_static(
+        1,
+        crate::arch::InterruptType::LevelLow,
+        || {
+            interrupt(i8042::Irq::Irq1);
+        },
+    ));
+    core::mem::forget(crate::arch::set_interrupt_static(
+        12,
+        crate::arch::InterruptType::LevelLow,
+        || {
+            interrupt(i8042::Irq::Irq12);
+        },
+    ));
 }
 
 pub async fn next_key() -> Option<DecodedKey> {

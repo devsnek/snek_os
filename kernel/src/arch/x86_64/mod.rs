@@ -174,11 +174,13 @@ pub fn get_pid() -> u64 {
 pub use acpi::pci_route_pin;
 pub use acpi::shutdown;
 pub use framebuffer::_print;
-pub use interrupts::{set_interrupt_dyn, set_interrupt_static, InterruptGuard};
+pub use interrupts::{
+    set_interrupt_dyn, set_interrupt_static, InterruptGuard, InterruptType, TIMER_INTERVAL,
+};
 pub use local::Local;
 pub use memory::{translate_phys_addr, translate_virt_addr};
 pub use pci::{get_devices as get_pci_devices, PciDevice};
-pub use time::now;
+pub use time::{now, timestamp};
 
 #[inline(always)]
 pub fn halt_loop() -> ! {

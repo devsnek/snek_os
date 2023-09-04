@@ -1,9 +1,13 @@
 use super::{acpi::AcpiAllocator, gdt};
-use acpi::{platform::interrupt::Apic as ApicInfo, InterruptModel, PlatformInfo};
+use acpi::{
+    platform::interrupt::{Apic as ApicInfo, Polarity, TriggerMode},
+    InterruptModel, PlatformInfo,
+};
+use core::{cmp::Ordering, time::Duration};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
 use x2apic::{
-    ioapic::{IoApic, IrqFlags, IrqMode, RedirectionTableEntry},
+    ioapic::{IoApic, IrqFlags},
     lapic::{IpiAllShorthand, LocalApic, LocalApicBuilder, TimerDivide, TimerMode},
 };
 use x86_64::{
@@ -25,6 +29,8 @@ const LOCAL_APIC_TLB_FLUSH: usize = NUM_VECTORS - 4;
 const LOCAL_APIC_ERROR: usize = NUM_VECTORS - 3;
 const LOCAL_APIC_TIMER: usize = NUM_VECTORS - 2;
 const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
+
+pub const TIMER_INTERVAL: Duration = Duration::from_millis(5);
 
 macro_rules! prologue {
     () => {
@@ -473,87 +479,140 @@ fn init_lapic() {
     println!("[LAPIC] initialized");
 }
 
+struct IoApicWithInfo {
+    io_apic: IoApic,
+    global_system_interrupt_base: u8,
+}
+
+static mut IO_APICS: [Option<IoApicWithInfo>; 32] = [const { None }; 32];
+fn get_io_apic(gsi: u8) -> &'static mut IoApicWithInfo {
+    for io_apic in unsafe { &mut IO_APICS } {
+        let Some(io_apic) = io_apic else {
+            continue;
+        };
+        if gsi < io_apic.global_system_interrupt_base {
+            continue;
+        }
+        let vector = gsi - io_apic.global_system_interrupt_base;
+        if vector > unsafe { io_apic.io_apic.max_table_entry() } {
+            continue;
+        }
+        return io_apic;
+    }
+    panic!("no io apic for {gsi}");
+}
+
 fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
-    for io_apic_info in apic_info.io_apics.iter() {
+    for (i, io_apic_info) in apic_info.io_apics.iter().enumerate() {
         let io_apic_virtual_address =
             super::memory::map_address(PhysAddr::new(io_apic_info.address as u64), 4096);
 
-        let mut ioapic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
+        let mut io_apic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
 
         unsafe {
-            ioapic.init(IOAPIC_START);
+            io_apic.init(IOAPIC_START);
         }
 
-        for i in 0..unsafe { ioapic.max_table_entry() } {
-            let mut entry = RedirectionTableEntry::default();
-            entry.set_mode(IrqMode::Fixed);
-            entry.set_flags(IrqFlags::LEVEL_TRIGGERED | IrqFlags::LOW_ACTIVE | IrqFlags::MASKED);
+        for i in 0..unsafe { io_apic.max_table_entry() } {
+            let mut entry = unsafe { io_apic.table_entry(i) };
+            entry.set_flags(entry.flags() | IrqFlags::MASKED);
             entry.set_vector(IOAPIC_START + i);
-            entry.set_dest(if i == 2 { LOCAL_APIC_SPURIOUS as u8 } else { 0 });
             unsafe {
-                ioapic.set_table_entry(i, entry);
+                io_apic.set_table_entry(i, entry);
             }
         }
 
-        for i in 0..unsafe { ioapic.max_table_entry() } {
-            unsafe {
-                ioapic.enable_irq(i);
-            }
+        unsafe {
+            IO_APICS[i] = Some(IoApicWithInfo {
+                io_apic,
+                global_system_interrupt_base: io_apic_info.global_system_interrupt_base as _,
+            });
         }
+    }
+
+    unsafe {
+        IO_APICS.sort_unstable_by(|a, b| match (a, b) {
+            (None, None) => Ordering::Equal,
+            (Some(..), None) => Ordering::Less,
+            (None, Some(..)) => Ordering::Greater,
+            (Some(ia), Some(ib)) => ia
+                .global_system_interrupt_base
+                .cmp(&ib.global_system_interrupt_base),
+        });
     }
 
     println!("[IOAPIC] initialized");
 }
 
-fn timer_frequency_hz() -> u32 {
+fn timer_frequency_hz() -> f64 {
     let cpuid = CpuId::new();
 
     if let Some(undivided_freq_khz) = cpuid
         .get_hypervisor_info()
         .and_then(|hypervisor| hypervisor.apic_frequency())
     {
-        let frequency_hz = undivided_freq_khz / 1000 / 16;
-        if frequency_hz > 0 {
+        let frequency_hz = undivided_freq_khz as f64 / 1000. / 16.;
+        if frequency_hz > 0.0 {
             return frequency_hz;
         }
     }
 
     if let Some(undivided_freq_hz) = cpuid.get_tsc_info().map(|tsc| tsc.nominal_frequency()) {
-        let frequency_hz = undivided_freq_hz / 16;
-        if frequency_hz > 0 {
+        let frequency_hz = undivided_freq_hz as f64 / 16.0;
+        if frequency_hz > 0.0 {
             return frequency_hz;
         }
     }
 
     let mut lapic = get_lapic();
+    let mut tick_counts = [0; 100];
 
-    unsafe {
-        lapic.set_timer_divide(TimerDivide::Div16);
-        lapic.set_timer_initial(-1i32 as u32);
-        lapic.set_timer_mode(TimerMode::OneShot);
-        lapic.enable_timer();
+    for ticks in &mut tick_counts {
+        unsafe {
+            lapic.set_timer_divide(TimerDivide::Div16);
+            lapic.set_timer_initial(u32::MAX);
+            lapic.set_timer_mode(TimerMode::OneShot);
+            lapic.enable_timer();
+        }
+
+        super::pit::PIT.lock().sleep(TIMER_INTERVAL);
+
+        unsafe {
+            lapic.disable_timer();
+        }
+
+        *ticks = u32::MAX.wrapping_sub(unsafe { lapic.timer_current() });
     }
 
-    super::pit::PIT
-        .lock()
-        .sleep(crate::task::timer::TIMER_INTERVAL);
+    fn average_without_some_outliers(data: &mut [u32]) -> f64 {
+        data.sort_unstable();
 
-    unsafe {
-        lapic.disable_timer();
+        let q1 = data[data.len() / 4];
+        let q3 = data[3 * data.len() / 4];
+
+        let mut sum = 0;
+        let mut count = 0;
+        for item in data {
+            if *item < q1 || *item > q3 {
+                continue;
+            }
+            sum += *item;
+            count += 1;
+        }
+
+        sum as f64 / count as f64
     }
 
-    let elapsed_ticks = unsafe { lapic.timer_current() };
-    let ticks_per_10ms = (-1i32 as u32).wrapping_sub(elapsed_ticks);
-    ticks_per_10ms * 100
+    let average = average_without_some_outliers(&mut tick_counts);
+
+    average * (1000.0 / (TIMER_INTERVAL.as_millis() as u64 as f64))
 }
 
 fn init_timing() {
-    let interval = core::time::Duration::from_millis(1);
     let timer_frequency_hz = timer_frequency_hz();
-    let ticks_per_ms = timer_frequency_hz / 1000;
-
-    let interval_ms = interval.as_millis() as u32;
-    let ticks_per_interval = interval_ms.checked_mul(ticks_per_ms).unwrap();
+    let ticks_per_ms = timer_frequency_hz / 1000.0;
+    let ticks_per_interval =
+        libm::round((TIMER_INTERVAL.as_millis() as u64 as f64) * ticks_per_ms) as u32;
 
     let mut lapic = get_lapic();
 
@@ -596,14 +655,6 @@ pub fn init_smp() {
     x86_64::instructions::interrupts::enable();
 }
 
-pub fn set_interrupt_static(gsi: u8, f: fn()) -> InterruptGuard {
-    set_interrupt(gsi, InterruptHandler::Static(f))
-}
-
-pub fn set_interrupt_dyn(gsi: u8, f: Box<dyn Fn()>) -> InterruptGuard {
-    set_interrupt(gsi, InterruptHandler::Dynamic(f))
-}
-
 #[must_use]
 pub struct InterruptGuard {
     gsi: u8,
@@ -611,18 +662,88 @@ pub struct InterruptGuard {
 
 impl Drop for InterruptGuard {
     fn drop(&mut self) {
+        let io_apic = get_io_apic(self.gsi);
+        let vector = self.gsi - io_apic.global_system_interrupt_base;
+
+        unsafe {
+            io_apic.io_apic.disable_irq(vector);
+        }
+
         unsafe {
             INTERRUPT_HANDLERS[self.gsi as usize] = InterruptHandler::None;
         }
     }
 }
 
-fn set_interrupt(gsi: u8, h: InterruptHandler) -> InterruptGuard {
-    // TODO: iterate ISOs
-    let gsi = if gsi == 0 { 2 } else { gsi };
-    unsafe {
-        INTERRUPT_HANDLERS[gsi as usize] = h;
+pub enum InterruptType {
+    EdgeHigh,
+    EdgeLow,
+    LevelHigh,
+    LevelLow,
+}
+
+pub fn set_interrupt_static(gsi: u8, itype: InterruptType, f: fn()) -> InterruptGuard {
+    set_interrupt(gsi, itype, InterruptHandler::Static(f))
+}
+
+pub fn set_interrupt_dyn(gsi: u8, itype: InterruptType, f: Box<dyn Fn()>) -> InterruptGuard {
+    set_interrupt(gsi, itype, InterruptHandler::Dynamic(f))
+}
+
+fn set_interrupt(mut gsi: u8, mut itype: InterruptType, h: InterruptHandler) -> InterruptGuard {
+    let acpi_allocator = AcpiAllocator::new();
+
+    let platform_info = super::acpi::get_platform_info(&acpi_allocator);
+    let InterruptModel::Apic(ref apic_info) = platform_info.interrupt_model else {
+        panic!("unsupported interrupt model")
+    };
+
+    for iso in apic_info.interrupt_source_overrides.iter() {
+        if iso.isa_source == gsi {
+            gsi = iso.global_system_interrupt as _;
+            itype = match (iso.trigger_mode, iso.polarity) {
+                (TriggerMode::Edge, Polarity::ActiveHigh) => InterruptType::EdgeHigh,
+                (TriggerMode::Edge, Polarity::ActiveLow) => InterruptType::EdgeLow,
+                (TriggerMode::Level, Polarity::ActiveHigh) => InterruptType::LevelHigh,
+                (TriggerMode::Level, Polarity::ActiveLow) => InterruptType::LevelLow,
+                _ => itype,
+            };
+            break;
+        }
     }
+
+    let io_apic = get_io_apic(gsi);
+    let vector = gsi - io_apic.global_system_interrupt_base;
+    let mut entry = unsafe { io_apic.io_apic.table_entry(vector) };
+    let mut flags = entry.flags();
+    match itype {
+        InterruptType::EdgeHigh => {
+            flags.remove(IrqFlags::LEVEL_TRIGGERED);
+            flags.remove(IrqFlags::LOW_ACTIVE);
+        }
+        InterruptType::EdgeLow => {
+            flags.remove(IrqFlags::LEVEL_TRIGGERED);
+            flags.insert(IrqFlags::LOW_ACTIVE);
+        }
+        InterruptType::LevelHigh => {
+            flags.insert(IrqFlags::LEVEL_TRIGGERED);
+            flags.remove(IrqFlags::LOW_ACTIVE);
+        }
+        InterruptType::LevelLow => {
+            flags.insert(IrqFlags::LEVEL_TRIGGERED);
+            flags.insert(IrqFlags::LOW_ACTIVE);
+        }
+    };
+    entry.set_flags(flags);
+
+    unsafe {
+        io_apic.io_apic.set_table_entry(vector, entry);
+
+        INTERRUPT_HANDLERS[gsi as usize] = h;
+
+        io_apic.io_apic.enable_irq(vector);
+    }
+
     InterruptGuard { gsi }
 }
 

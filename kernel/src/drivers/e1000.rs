@@ -305,6 +305,7 @@ impl E1000 {
         let gsi = crate::arch::pci_route_pin(header);
         this.interrupt_guard = Some(crate::arch::set_interrupt_dyn(
             gsi,
+            crate::arch::InterruptType::LevelLow,
             Box::new(move || {
                 let this = unsafe { &mut *this_raw };
                 this.handle_irq();

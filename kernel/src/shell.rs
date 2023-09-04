@@ -19,6 +19,21 @@ fn run(line: &str) {
         });
         return;
     }
+    if line == "timing" {
+        crate::task::spawn(async {
+            for _ in 0..30 {
+                let uptime = crate::arch::now();
+                let unix = crate::arch::timestamp();
+                println!("{uptime:?} {unix:?}");
+                maitake::time::sleep(core::time::Duration::from_secs(1)).await;
+            }
+        });
+        return;
+    }
+    if line == "nettest" {
+        crate::net::test_task();
+        return;
+    }
     println!("unknown command");
 }
 

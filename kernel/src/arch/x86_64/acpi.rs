@@ -1,4 +1,8 @@
-use super::{pci::PciDevice, stack_allocator::StackAllocator};
+use super::{
+    interrupts::{set_interrupt_static, InterruptType},
+    pci::PciDevice,
+    stack_allocator::StackAllocator,
+};
 use acpi::{
     fadt::Fadt,
     mcfg::PciConfigRegions,
@@ -46,8 +50,9 @@ pub fn late_init() {
     lai::create_namespace();
 
     let fadt = get_tables().find_table::<Fadt>().unwrap();
-    core::mem::forget(super::interrupts::set_interrupt_static(
+    core::mem::forget(set_interrupt_static(
         fadt.sci_interrupt as _,
+        InterruptType::LevelLow,
         handle_interrupt,
     ));
 
@@ -82,6 +87,10 @@ pub fn pci_route_pin(device: &PciDevice) -> u8 {
 pub fn get_century_register() -> u8 {
     let fadt = get_tables().find_table::<Fadt>().unwrap();
     fadt.century
+}
+
+pub fn get_platform_info<G: alloc::alloc::Allocator>(g: &G) -> PlatformInfo<'static, &G> {
+    get_tables().platform_info_in(g).unwrap()
 }
 
 pub fn shutdown() {

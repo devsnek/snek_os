@@ -20,18 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use core::convert::TryInto;
+use super::interrupts::{set_interrupt_static, InterruptType};
 use core::sync::atomic::{AtomicBool, Ordering};
 use core::time::Duration;
 use spin::Mutex;
 use x86_64::instructions::port::Port;
 
-const BASE_FREQUENCY_HZ: usize = 1193180;
-const TICKS_PER_MS: usize = BASE_FREQUENCY_HZ / 1000;
+const BASE_FREQUENCY_HZ: usize = 1193182;
 
 lazy_static! {
     pub static ref PIT: Mutex<Pit> = {
-        core::mem::forget(super::interrupts::set_interrupt_static(0, on_tick));
+        core::mem::forget(set_interrupt_static(0, InterruptType::EdgeHigh, on_tick));
         Mutex::new(Pit::new())
     };
 }
@@ -67,9 +66,10 @@ impl Pit {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .unwrap();
 
-        let duration_ms: usize = duration.as_millis().try_into().unwrap();
-        let target_time = TICKS_PER_MS * duration_ms;
-        let divisor = target_time.try_into().unwrap();
+        let duration_ms = duration.as_millis() as u64 as f64;
+        let ticks_per_ms = BASE_FREQUENCY_HZ as f64 / 1000.0;
+        let target_time = ticks_per_ms * duration_ms;
+        let divisor = libm::round(target_time) as u16;
 
         let interrupts_enabled = x86_64::instructions::interrupts::are_enabled();
         x86_64::instructions::interrupts::disable();

@@ -24,7 +24,7 @@ impl<D: Driver> Interface<D> {
         let mut config = smoltcp::iface::Config::new(device.address());
         config.random_seed = crate::arch::rand().unwrap();
 
-        let now = smoltcp::time::Instant::from_micros(crate::arch::now() as i64);
+        let now = smoltcp::time::Instant::from_micros(crate::arch::now().as_micros() as i64);
 
         let iface = smoltcp::iface::Interface::new(config, &mut device, now);
         let mut sockets = smoltcp::iface::SocketSet::new(vec![]);
@@ -107,7 +107,8 @@ impl<D: Driver> Interface<D> {
         loop {
             let timestamp = {
                 let inner = &mut *self.inner.lock();
-                let timestamp = smoltcp::time::Instant::from_micros(crate::arch::now() as i64);
+                let timestamp =
+                    smoltcp::time::Instant::from_micros(crate::arch::now().as_micros() as i64);
                 inner
                     .iface
                     .poll(timestamp, &mut self.device, &mut inner.sockets);
@@ -141,7 +142,9 @@ where
     crate::task::spawn(async move {
         interface.run().await;
     });
+}
 
+pub fn test_task() {
     crate::task::spawn(async {
         let ip = get_ips("snek.dev".to_owned()).await[0];
         println!("got ip {:?}", ip);
@@ -161,8 +164,7 @@ async fn http_get(ip: smoltcp::wire::IpAddress) {
         inner.sockets.add(tcp_socket)
     };
 
-    // CONNECT
-
+    println!("connecting");
     {
         let inner = &mut *DEFAULT_DRIVER.get().unwrap().lock();
         let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);

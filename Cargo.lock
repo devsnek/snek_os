@@ -490,6 +490,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7012b1bbb0719e1097c47611d3898568c546d597c2e74d66f6087edd5233ff4"
+
+[[package]]
 name = "limine"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1075,6 +1081,7 @@ dependencies = [
  "image",
  "lai",
  "lazy_static",
+ "libm",
  "limine",
  "maitake",
  "mycelium-bitfield",
