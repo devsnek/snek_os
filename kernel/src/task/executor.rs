@@ -35,7 +35,7 @@ use maitake::{
     task::JoinHandle,
 };
 use pin_project::pin_project;
-use rand::{Rng, SeedableRng};
+use rand::{rngs::OsRng, Rng, RngCore, SeedableRng};
 
 static SCHEDULER: Local<Cell<Option<&'static StaticScheduler>>> = Local::new(|| Cell::new(None));
 
@@ -93,7 +93,7 @@ impl Executor {
             id,
             scheduler,
             running: AtomicBool::new(false),
-            rng: rand_xoshiro::Xoroshiro128PlusPlus::seed_from_u64(crate::arch::rand().unwrap()),
+            rng: rand_xoshiro::Xoroshiro128PlusPlus::seed_from_u64(OsRng.next_u64()),
         }
     }
 

@@ -1,6 +1,7 @@
 use alloc::sync::Arc;
 use conquer_once::spin::OnceCell;
 use core::time::Duration;
+use rand::{rngs::OsRng, Rng, RngCore};
 use spin::Mutex;
 
 pub trait Driver: smoltcp::phy::Device + Sized + Send + Sync {
@@ -22,7 +23,7 @@ struct Interface<D: Driver> {
 impl<D: Driver> Interface<D> {
     fn new(mut device: D) -> Self {
         let mut config = smoltcp::iface::Config::new(device.address());
-        config.random_seed = crate::arch::rand().unwrap();
+        config.random_seed = OsRng.next_u64();
 
         let now = smoltcp::time::Instant::from_micros(crate::arch::now().as_micros() as i64);
 
@@ -168,7 +169,7 @@ async fn http_get(host: String, ip: smoltcp::wire::IpAddress) {
     {
         let inner = &mut *DEFAULT_DRIVER.get().unwrap().lock();
         let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);
-        let local_port = 49152 + (crate::arch::rand().unwrap() as u16) % 16384;
+        let local_port = 49152 + OsRng.gen::<u16>() % 16384;
         socket
             .connect(inner.iface.context(), (ip, 80), local_port)
             .unwrap();

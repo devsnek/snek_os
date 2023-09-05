@@ -14,7 +14,8 @@ noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = 
 mycelium-bitfield = { workspace = true }
 maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
 rand_xoshiro = "0.6"
-rand = { version = "0.8", default-features = false }
+rand = { version = "0.8", default-features = false, features = ["getrandom"] }
+getrandom = { version = "0.2", default-features = false, features = ["rdrand"] }
 pci-ids = "0.2"
 pci_types = "0.5"
 rustc-demangle = "0.1"

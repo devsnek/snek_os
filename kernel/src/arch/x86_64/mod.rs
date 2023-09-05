@@ -15,7 +15,7 @@ use limine::{
     FramebufferRequest, HhdmRequest, KernelAddressRequest, KernelFileRequest, MemmapRequest,
     RsdpRequest, SmpInfo, SmpRequest,
 };
-use x86_64::{instructions::random::RdRand, registers::model_specific::Msr, VirtAddr};
+use x86_64::{registers::model_specific::Msr, VirtAddr};
 
 static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 static HHDM: HhdmRequest = HhdmRequest::new(0);
@@ -199,7 +199,3 @@ pub fn enable_interrupts_and_halt() {
 
 pub use x86_64::instructions::interrupts::disable as disable_interrupts;
 pub use x86_64::instructions::interrupts::without_interrupts;
-
-pub fn rand() -> Option<u64> {
-    RdRand::new()?.get_u64()
-}
