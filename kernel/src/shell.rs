@@ -30,8 +30,9 @@ fn run(line: &str) {
         });
         return;
     }
-    if line == "nettest" {
-        crate::net::test_task();
+    if line.starts_with("nettest") {
+        let host = line.strip_prefix("nettest ").unwrap();
+        crate::net::test_task(host.to_string());
         return;
     }
     println!("unknown command");

@@ -2,6 +2,7 @@ mod acpi;
 mod allocator;
 mod framebuffer;
 mod gdt;
+mod hpet;
 mod interrupts;
 mod local;
 mod memory;
@@ -79,6 +80,8 @@ fn start() -> ! {
     allocator::init();
 
     acpi::late_init();
+
+    hpet::init();
 
     time::init();
 

@@ -1,0 +1,8 @@
+[package]
+name = "hpet"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+volatile = "0.5"
+mycelium-bitfield = { workspace = true }

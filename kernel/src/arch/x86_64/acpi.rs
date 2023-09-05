@@ -5,6 +5,7 @@ use super::{
 };
 use acpi::{
     fadt::Fadt,
+    hpet::HpetInfo,
     mcfg::PciConfigRegions,
     platform::PlatformInfo,
     sdt::{SdtHeader, Signature},
@@ -91,6 +92,10 @@ pub fn get_century_register() -> u8 {
 
 pub fn get_platform_info<G: alloc::alloc::Allocator>(g: &G) -> PlatformInfo<'static, &G> {
     get_tables().platform_info_in(g).unwrap()
+}
+
+pub fn get_hpet() -> Option<HpetInfo> {
+    HpetInfo::new(get_tables()).ok()
 }
 
 pub fn shutdown() {

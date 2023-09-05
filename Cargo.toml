@@ -6,4 +6,8 @@ members = [
   "crates/i8042",
   "crates/snalloc",
   "crates/e9",
+  "crates/hpet",
 ]
+
+[workspace.dependencies]
+mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }

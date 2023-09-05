@@ -2,14 +2,13 @@ use super::interrupts::TIMER_INTERVAL;
 use chrono::{TimeZone, Utc};
 use cmos::CMOS;
 use core::{
-    arch::x86_64::_rdtsc as rdtsc,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 static UPTIME_MS: AtomicU64 = AtomicU64::new(0);
 static BOOT_SEC: AtomicU64 = AtomicU64::new(0);
-static LAST_RTC: AtomicU64 = AtomicU64::new(0);
+static LAST_HPET: AtomicU64 = AtomicU64::new(0);
 
 pub fn init() {
     let mut cmos = CMOS::new();
@@ -22,12 +21,22 @@ pub fn init() {
 
 pub fn on_tick() {
     UPTIME_MS.fetch_add(TIMER_INTERVAL.as_millis() as _, Ordering::Relaxed);
-    let tsc = unsafe { rdtsc() };
-    LAST_RTC.store(tsc, Ordering::Relaxed);
+    if let Some(counter) = super::hpet::get_counter() {
+        LAST_HPET.store(counter, Ordering::Relaxed);
+    }
 }
 
 pub fn now() -> Duration {
-    Duration::from_millis(UPTIME_MS.load(Ordering::SeqCst))
+    let counter = super::hpet::get_counter();
+    let now = Duration::from_millis(UPTIME_MS.load(Ordering::SeqCst));
+    if let Some(counter) = counter {
+        let period = super::hpet::get_counter_period().unwrap();
+        let last = LAST_HPET.load(Ordering::SeqCst);
+        let fs = (counter - last) * period as u64;
+        now + Duration::from_nanos(fs / 1000000)
+    } else {
+        now
+    }
 }
 
 pub fn timestamp() -> Duration {

@@ -144,15 +144,15 @@ where
     });
 }
 
-pub fn test_task() {
+pub fn test_task(host: String) {
     crate::task::spawn(async {
-        let ip = get_ips("snek.dev".to_owned()).await[0];
+        let ip = get_ips(&host).await[0];
         println!("got ip {:?}", ip);
-        http_get(ip).await;
+        http_get(host, ip).await;
     });
 }
 
-async fn http_get(ip: smoltcp::wire::IpAddress) {
+async fn http_get(host: String, ip: smoltcp::wire::IpAddress) {
     use smoltcp::*;
 
     let tcp_rx_buffer = socket::tcp::SocketBuffer::new(vec![0; 1500]);
@@ -209,7 +209,7 @@ async fn http_get(ip: smoltcp::wire::IpAddress) {
                         .send_slice(b"GET / HTTP/1.1\r\n")
                         .expect("cannot send");
                     socket
-                        .send_slice(b"Host: snek.dev\r\n")
+                        .send_slice(format!("Host: {}\r\n", host).as_bytes())
                         .expect("cannot send");
                     socket
                         .send_slice(
@@ -241,9 +241,16 @@ async fn http_get(ip: smoltcp::wire::IpAddress) {
 
         maitake::future::yield_now().await;
     }
+
+    DEFAULT_DRIVER
+        .get()
+        .unwrap()
+        .lock()
+        .sockets
+        .remove(tcp_handle);
 }
 
-async fn get_ips(name: String) -> Vec<smoltcp::wire::IpAddress> {
+async fn get_ips(name: &str) -> Vec<smoltcp::wire::IpAddress> {
     use smoltcp::*;
 
     loop {
@@ -260,13 +267,13 @@ async fn get_ips(name: String) -> Vec<smoltcp::wire::IpAddress> {
     let mut dns_socket = socket::dns::Socket::new(&inner.dns_servers, vec![]);
 
     let query_handle = dns_socket
-        .start_query(inner.iface.context(), &name, wire::DnsQueryType::A)
+        .start_query(inner.iface.context(), name, wire::DnsQueryType::A)
         .unwrap();
 
     let dns_handle = inner.sockets.add(dns_socket);
     drop(inner);
 
-    core::future::poll_fn(|cx| {
+    let ips = core::future::poll_fn(|cx| {
         use core::task::Poll;
         let mut inner = DEFAULT_DRIVER.get().unwrap().lock();
         let socket = inner.sockets.get_mut::<socket::dns::Socket>(dns_handle);
@@ -281,5 +288,14 @@ async fn get_ips(name: String) -> Vec<smoltcp::wire::IpAddress> {
             }
         }
     })
-    .await
+    .await;
+
+    DEFAULT_DRIVER
+        .get()
+        .unwrap()
+        .lock()
+        .sockets
+        .remove(dns_handle);
+
+    ips
 }

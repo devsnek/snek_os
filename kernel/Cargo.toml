@@ -11,7 +11,7 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = ["size_16", "regular", "unicode-basic-latin", "unicode-specials"] }
-mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
+mycelium-bitfield = { workspace = true }
 maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false }
@@ -19,12 +19,9 @@ pci-ids = "0.2"
 pci_types = "0.5"
 rustc-demangle = "0.1"
 snalloc = { path = "../crates/snalloc" }
-limine = "0.1"
 embedded-graphics = "0.8"
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
 pin-project = "1.1"
 bitflags = "2.4"
-lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
 smoltcp = { version = "0.10", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ethernet", "socket-tcp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns"] }
 chrono = { version = "0.4", default-features = false }
 libm = "0.2"
@@ -40,6 +37,10 @@ xmas-elf = "0.9"
 cmos = { path = "../crates/cmos" }
 i8042 = { path = "../crates/i8042" }
 e9 = { path = "../crates/e9" }
+hpet = { path = "../crates/hpet" }
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
+lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
+limine = "0.1"
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }
