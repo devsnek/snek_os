@@ -18,7 +18,6 @@ use x86_64::{instructions::port::Port, VirtAddr};
 
 pub type AcpiAllocator = StackAllocator<2048>;
 
-static mut RSDP_ADDRESS: VirtAddr = VirtAddr::zero();
 static mut ACPI_TABLES: OnceCell<AcpiTables<AcpiHandlerImpl>> = OnceCell::uninit();
 
 fn get_tables() -> &'static AcpiTables<AcpiHandlerImpl> {
@@ -30,10 +29,9 @@ pub fn early_init(
     rsdp_address: VirtAddr,
 ) -> PlatformInfo<'_, &AcpiAllocator> {
     unsafe {
-        RSDP_ADDRESS = rsdp_address;
         ACPI_TABLES
             .try_init_once(|| {
-                AcpiTables::from_rsdp(AcpiHandlerImpl, RSDP_ADDRESS.as_u64() as _).unwrap()
+                AcpiTables::from_rsdp(AcpiHandlerImpl, rsdp_address.as_u64() as _).unwrap()
             })
             .unwrap();
     }

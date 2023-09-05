@@ -1,9 +1,8 @@
 #![no_std]
+#![doc=include_str!("../README.md")]
 
 use core::ptr::NonNull;
-use volatile::VolatilePtr;
-
-// https://www.intel.com/content/dam/www/public/us/en/documents/technical-specifications/software-developers-hpet-spec-1-0a.pdf
+use volatile::{access::ReadOnly, VolatilePtr};
 
 mycelium_bitfield::bitfield! {
     struct CapabilitiesAndID<u64> {
@@ -36,28 +35,10 @@ mycelium_bitfield::bitfield! {
 
 mycelium_bitfield::bitfield! {
     struct InterruptStatus<u64> {
-        /// Timer 0 interrupt active (only for level-triggered mode)
-        const T0_INT_STS: bool;
-        /// ...
-        const T1_INT_STS: bool;
-        /// ...
-        const T2_INT_STS: bool;
-        const _RESERVED = 61;
+        /// Tn_INT_STS 0-31
+        const T_INT_STS: u32;
+        const _RESERVED = 32;
     }
-}
-
-#[derive(Debug)]
-#[repr(C)]
-pub struct Hpet {
-    capabilities_and_id: CapabilitiesAndID,
-    padding0: u64,
-    configuration: Configuration,
-    padding1: u64,
-    interrupt_status: InterruptStatus,
-    padding2: [u64; 25],
-    counter_value: u64,
-    padding3: u64,
-    timers: [HpetTimer; 32],
 }
 
 mycelium_bitfield::bitfield! {
@@ -79,6 +60,22 @@ mycelium_bitfield::bitfield! {
     }
 }
 
+/// Represents the HPET in memory.
+#[derive(Debug)]
+#[repr(C)]
+pub struct Hpet {
+    capabilities_and_id: CapabilitiesAndID,
+    padding0: u64,
+    configuration: Configuration,
+    padding1: u64,
+    general_interrupt_status: InterruptStatus,
+    padding2: [u64; 25],
+    counter_value: u64,
+    padding3: u64,
+    timers: [HpetTimer; 32],
+}
+
+/// Represents an HPET timer in memory.
 #[derive(Debug)]
 #[repr(C)]
 pub struct HpetTimer {
@@ -88,20 +85,16 @@ pub struct HpetTimer {
 }
 
 impl Hpet {
-    fn capabilities_and_id(&self) -> VolatilePtr<CapabilitiesAndID> {
-        unsafe { VolatilePtr::new(NonNull::from(&self.capabilities_and_id)) }
+    fn capabilities_and_id(&self) -> VolatilePtr<CapabilitiesAndID, ReadOnly> {
+        unsafe { VolatilePtr::new_read_only(NonNull::from(&self.capabilities_and_id)) }
     }
 
     fn configuration(&self) -> VolatilePtr<Configuration> {
         unsafe { VolatilePtr::new(NonNull::from(&self.configuration)) }
     }
 
-    /// Get the number of timers.
-    pub fn num_timers(&self) -> u8 {
-        self.capabilities_and_id()
-            .read()
-            .get(CapabilitiesAndID::NUM_TIM_CAP) as u8
-            + 1
+    fn general_interrupt_status(&self) -> VolatilePtr<InterruptStatus> {
+        unsafe { VolatilePtr::new(NonNull::from(&self.general_interrupt_status)) }
     }
 
     /// Get the counter period in femtoseconds.
@@ -116,11 +109,40 @@ impl Hpet {
         unsafe { (&self.counter_value as *const u64).read_volatile() }
     }
 
+    /// If using level-triggered interrupts, get whether a timer is asserting.
+    pub fn interrupt_status(&self, timer: u8) -> bool {
+        let timer = timer as u32;
+        self.general_interrupt_status()
+            .read()
+            .get(InterruptStatus::T_INT_STS)
+            & timer
+            == timer
+    }
+
+    /// If using level-triggered interrupts, clear an asserting timer.
+    pub fn clear_interrupt_status(&mut self, timer: u8) {
+        self.general_interrupt_status().update(|mut s| {
+            let mut sts = s.get(InterruptStatus::T_INT_STS);
+            sts |= 1 << timer;
+            s.set(InterruptStatus::T_INT_STS, sts);
+            s
+        })
+    }
+
     /// Enable or disable the counter.
     pub fn set_counter_enable(&mut self, enable: bool) {
         self.configuration().update(|mut c| {
             c.set(Configuration::ENABLE_CNF, enable);
             c
         })
+    }
+
+    /// Get the available timers.
+    pub fn timers(&self) -> &[HpetTimer] {
+        let last_timer_index = self
+            .capabilities_and_id()
+            .read()
+            .get(CapabilitiesAndID::NUM_TIM_CAP) as usize;
+        &self.timers[..=last_timer_index]
     }
 }
