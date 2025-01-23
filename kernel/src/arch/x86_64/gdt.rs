@@ -90,7 +90,7 @@ fn load(gdt: &'static GlobalDescriptorTable, selectors: &Selectors) {
 lazy_static! {
     pub static ref BP_TSS: TaskStateSegment = tss!({
         static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
-        unsafe { &STACK }
+        core::ptr::addr_of!(STACK)
     });
     pub static ref BP_GDT: (GlobalDescriptorTable, Selectors) = build(&BP_TSS);
 }

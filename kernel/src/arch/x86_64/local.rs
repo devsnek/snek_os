@@ -1,57 +1,17 @@
-use alloc::collections::{btree_map::Entry, BTreeMap};
-use core::{
-    marker::PhantomPinned,
-    pin::Pin,
-    sync::atomic::{AtomicUsize, Ordering},
-};
-use spin::{Lazy, Mutex};
+use alloc::collections::BTreeMap;
+use core::{marker::PhantomPinned, pin::Pin};
+use spin::Mutex;
 use x86_64::{
     registers::model_specific::{GsBase, KernelGsBase},
     VirtAddr,
 };
-
-pub struct Local<T> {
-    id: Lazy<usize>,
-    initializer: fn() -> T,
-}
-
-impl<T: 'static> Local<T> {
-    pub const fn new(initializer: fn() -> T) -> Self {
-        Self {
-            id: Lazy::new(Self::next_id),
-            initializer,
-        }
-    }
-
-    fn next_id() -> usize {
-        static ID: AtomicUsize = AtomicUsize::new(0);
-        ID.fetch_add(1, Ordering::Relaxed)
-    }
-
-    pub fn with<U, F>(&self, f: F) -> U
-    where
-        F: FnOnce(&T) -> U,
-    {
-        let local = GsLocalData::get().expect("failed to load GsLocalData");
-        let ptr = match local.data.lock().entry(*self.id) {
-            Entry::Occupied(e) => *e.get(),
-            Entry::Vacant(v) => {
-                let ptr = Box::into_raw(Box::new((self.initializer)())) as *mut ();
-                v.insert(ptr);
-                ptr
-            }
-        };
-        let data = unsafe { &*(ptr as *const T) };
-        f(data)
-    }
-}
 
 #[repr(C)]
 #[derive(Debug)]
 pub struct GsLocalData {
     _self: *const Self,
     magic: usize,
-    data: Mutex<BTreeMap<usize, *mut ()>>,
+    pub data: Mutex<BTreeMap<usize, *mut ()>>,
     _must_pin: PhantomPinned,
 }
 
@@ -66,22 +26,19 @@ impl GsLocalData {
         }
     }
 
-    fn get() -> Option<Pin<&'static Self>> {
-        if GsBase::read() == VirtAddr::new(0) {
-            return None;
-        }
-        let magic: usize;
-        unsafe {
-            asm!("mov {}, gs:0x8", out(reg) magic);
-        }
-        if magic != Self::MAGIC {
-            return None;
-        }
-        unsafe {
+    pub fn get() -> Option<Pin<&'static Self>> {
+        let this = unsafe {
             let ptr: *const Self;
             asm!("mov {}, gs:0x0", out(reg) ptr);
-            Some(Pin::new_unchecked(&*ptr))
+            if ptr.is_null() {
+                return None;
+            }
+            Pin::new_unchecked(&*ptr)
+        };
+        if this.magic != Self::MAGIC {
+            return None;
         }
+        Some(this)
     }
 }
 

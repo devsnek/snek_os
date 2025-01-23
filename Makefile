@@ -6,11 +6,13 @@ ifeq ($(BUILD), debug)
 	CARGO_PROFILE = dev
 endif
 
+TARGET_ARCH = $(shell cut -d- -f1 <<< $(TARGET))
 KERNEL = target/$(TARGET)/$(BUILD)/snek_kernel
 ISO = out/$(TARGET)/$(BUILD)/snek_os.iso
 OVMF = out/ovmf/OVMF.fd
 LIMINE_BIN = out/limine/limine
 LIMINE ?= out/limine
+LIMINE_CFG = kernel/limine.cfg
 
 .PHONY: all
 all: $(ISO)
@@ -25,14 +27,14 @@ $(LIMINE_BIN):
 	cd out/limine && $(MAKE)
 
 $(KERNEL): FORCE
-	cargo build --profile $(CARGO_PROFILE) --package snek_kernel --target $(TARGET)
+	cargo build --profile $(CARGO_PROFILE) --package snek_kernel --target $(TARGET) --config kernel/config.toml
 
-$(ISO): $(KERNEL) $(OVMF) $(LIMINE_BIN)
+$(ISO): $(KERNEL) $(OVMF) $(LIMINE_BIN) $(LIMINE_CFG)
 	rm -rf out/iso_root
 	mkdir -p out/iso_root
 	mkdir -p out/$(TARGET)/$(BUILD)
 	cp $(KERNEL) out/iso_root/kernel.elf
-	cp kernel/limine.cfg out/iso_root/
+	cp $(LIMINE_CFG) out/iso_root/
 	cp -v $(LIMINE)/limine-bios.sys $(LIMINE)/limine-bios-cd.bin $(LIMINE)/limine-uefi-cd.bin out/iso_root/
 	mkdir -p out/iso_root/EFI/BOOT
 	cp -v $(LIMINE)/BOOTX64.EFI out/iso_root/EFI/BOOT/
@@ -54,18 +56,20 @@ fmt:
 	cargo fmt
 
 clippy:
-	cargo clippy --package snek_kernel --target $(TARGET)
+	cargo clippy --package snek_kernel --target $(TARGET) --config kernel/config.toml
 
 run: $(ISO)
-	qemu-system-x86_64 \
+	"qemu-system-$(TARGET_ARCH)" \
 		-enable-kvm \
 		-cpu host \
 		-M q35 \
 		-debugcon /dev/stdout \
 		-smp 4 \
-		-m 4G \
+		-m 8G \
 		-rtc base=utc,clock=host \
-		-device qemu-xhci \
 		-netdev user,id=u1 -device e1000,netdev=u1 \
+		-drive file=disk.img,if=none,id=nvm,format=raw \
+		-device nvme,serial=deadbeef,drive=nvm \
+		-audio model=hda,driver=pa \
 		-bios $(OVMF) \
 		-drive file=$(ISO),format=raw

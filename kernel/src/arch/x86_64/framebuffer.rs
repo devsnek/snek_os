@@ -4,8 +4,6 @@ use limine::Framebuffer;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
 
-static mut EMPTY_BUF: [u8; 0] = [];
-
 #[derive(Debug, Clone, Copy)]
 pub enum PixelFormat {
     Rgb,
@@ -16,18 +14,19 @@ pub enum PixelFormat {
 
 lazy_static! {
     pub static ref DISPLAY: Mutex<Display> = Mutex::new(Display {
-        buffer: unsafe { &mut EMPTY_BUF },
+        buffer: &mut [],
+        cache: None,
         width: 0,
         height: 0,
         bytes_per_pixel: 0,
         pixel_format: PixelFormat::Bgr,
         stride: 0,
-        x_pos: 0,
-        y_pos: 0,
+        x_pos: BORDER_PADDING,
+        y_pos: BORDER_PADDING,
     });
 }
 
-pub fn init(info: &Framebuffer) {
+pub fn early_init(info: &Framebuffer) {
     let mut display = DISPLAY.lock();
     display.buffer =
         unsafe { core::slice::from_raw_parts_mut(info.address.as_ptr().unwrap(), info.size()) };
@@ -48,6 +47,11 @@ pub fn init(info: &Framebuffer) {
     display.clear();
 
     display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
+}
+
+pub fn late_init() {
+    let mut display = DISPLAY.lock();
+    display.cache = Some(display.buffer.to_owned());
 }
 
 #[doc(hidden)]
@@ -73,6 +77,7 @@ fn get_char_raster(c: char) -> RasterizedChar {
 
 pub struct Display {
     buffer: &'static mut [u8],
+    cache: Option<Vec<u8>>,
     width: usize,
     height: usize,
     stride: usize,
@@ -103,6 +108,9 @@ impl Display {
         self.x_pos = BORDER_PADDING;
         self.y_pos = BORDER_PADDING;
         self.buffer.fill(0);
+        if let Some(cache) = &mut self.cache {
+            cache.fill(0);
+        }
     }
 
     fn scroll(&mut self) {
@@ -114,8 +122,14 @@ impl Display {
         let pixels = self.stride * pixel_height;
         let bytes = pixels * bytes_per_pixel;
 
-        self.buffer.copy_within(next_line_offset.., 0);
-        self.buffer[(bytes + 1)..].fill(0);
+        if let Some(cache) = &mut self.cache {
+            cache.copy_within(next_line_offset.., 0);
+            cache[(bytes + 1)..].fill(0);
+            self.buffer.copy_from_slice(cache);
+        } else {
+            self.buffer.copy_within(next_line_offset.., 0);
+            self.buffer[(bytes + 1)..].fill(0);
+        }
     }
 
     fn write_pixel(&mut self, x: usize, y: usize, mut r: u8, mut g: u8, mut b: u8, a: u8) {
@@ -128,7 +142,11 @@ impl Display {
         let byte_offset = pixel_offset * bytes_per_pixel;
 
         if a != 255 {
-            let bytes = &self.buffer[byte_offset..(byte_offset + bytes_per_pixel)];
+            let bytes = if let Some(cache) = &mut self.cache {
+                &cache[byte_offset..(byte_offset + bytes_per_pixel)]
+            } else {
+                &self.buffer[byte_offset..(byte_offset + bytes_per_pixel)]
+            };
             let (r0, g0, b0) = match self.pixel_format {
                 PixelFormat::Rgb => (bytes[0], bytes[1], bytes[2]),
                 PixelFormat::Bgr => (bytes[2], bytes[1], bytes[0]),
@@ -166,6 +184,10 @@ impl Display {
 
         self.buffer[byte_offset..(byte_offset + bytes_per_pixel)]
             .copy_from_slice(&color[..bytes_per_pixel]);
+        if let Some(cache) = &mut self.cache {
+            cache[byte_offset..(byte_offset + bytes_per_pixel)]
+                .copy_from_slice(&color[..bytes_per_pixel]);
+        }
     }
 
     fn write_char(&mut self, c: char) {
@@ -199,21 +221,33 @@ impl Display {
     fn write_rgba(&mut self, bytes: &[u8]) {
         let mut image = bytes.iter();
 
-        let width = u32::from_be_bytes([(); 4].map(|_| *image.next().unwrap()));
-        let height = u32::from_be_bytes([(); 4].map(|_| *image.next().unwrap()));
+        let width = u32::from_le_bytes([(); 4].map(|_| *image.next().unwrap()));
+        let height = u32::from_le_bytes([(); 4].map(|_| *image.next().unwrap()));
 
-        for _ in 0..height {
-            for x in 0..width {
-                let r = *image.next().unwrap();
-                let g = *image.next().unwrap();
-                let b = *image.next().unwrap();
-                let a = *image.next().unwrap();
-                self.write_pixel(self.x_pos + x as usize, self.y_pos, r, g, b, a);
+        'outer: loop {
+            let count = u16::from_le_bytes([(); 2].map(|_| *image.next().unwrap()));
+            let r = *image.next().unwrap();
+            let g = *image.next().unwrap();
+            let b = *image.next().unwrap();
+            let a = *image.next().unwrap();
+
+            for _ in 0..count {
+                self.write_pixel(self.x_pos, self.y_pos, r, g, b, a);
+
+                self.x_pos += 1;
+
+                if (self.x_pos - BORDER_PADDING) >= width as usize {
+                    self.x_pos = BORDER_PADDING;
+                    self.y_pos += 1;
+                }
+
+                if self.y_pos >= height as usize {
+                    break 'outer;
+                }
             }
-            self.y_pos += 1;
         }
 
-        self.x_pos = 0;
+        self.x_pos = BORDER_PADDING;
         self.y_pos += LINE_SPACING;
     }
 }

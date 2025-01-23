@@ -1,9 +1,10 @@
+use crate::arch::PciDevice;
 use acpi::PciConfigRegions;
 use alloc::collections::BTreeMap;
-use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
 use pci_types::{
     Bar, ConfigRegionAccess, EndpointHeader, HeaderType, PciAddress, PciHeader, PciPciBridgeHeader,
 };
+use spin::{rwlock::RwLockReadGuard, RwLock};
 use x86_64::VirtAddr;
 
 struct Resolver<'a> {
@@ -173,65 +174,10 @@ impl<'a> Resolver<'a> {
     }
 }
 
-#[derive(Debug)]
-pub struct PciDevice {
-    pub physical_offset: usize,
-    pub configuration_address: usize,
-    pub address: PciAddress,
-    pub class: u8,
-    pub sub_class: u8,
-    pub interface: u8,
-    pub vendor_id: u16,
-    pub device_id: u16,
-    pub sub_vendor_id: u16,
-    pub sub_device_id: u16,
-    pub revision: u8,
-    pub bars: [Option<Bar>; 6],
-    pub interrupt_pin: u8,
-    pub interrupt_line: u8,
-}
+static DEVICES: RwLock<BTreeMap<PciAddress, PciDevice>> = RwLock::new(BTreeMap::new());
 
-impl PciDevice {
-    pub fn name(&self) -> String {
-        if let Some(device) = DeviceInfo::from_vid_pid(self.vendor_id, self.device_id) {
-            format!("{} {}", device.vendor().name(), device.name())
-        } else {
-            SubclassInfo::from_cid_sid(self.class, self.sub_class)
-                .map(|subclass| {
-                    subclass
-                        .prog_ifs()
-                        .find(|i| i.id() == self.interface)
-                        .map(|i| i.name())
-                        .unwrap_or(subclass.name())
-                })
-                .unwrap_or("Unknown Device")
-                .to_owned()
-        }
-    }
-
-    unsafe fn read<T: Sized + Copy>(&self, offset: u16) -> T {
-        ((self.configuration_address + offset as usize) as *const T).read_volatile()
-    }
-
-    unsafe fn write<T: Sized + Copy>(&self, offset: u16, value: T) {
-        ((self.configuration_address + offset as usize) as *mut T).write_volatile(value)
-    }
-
-    pub fn enable_mmio(&self) {
-        let command = unsafe { self.read::<u16>(0x04) };
-        unsafe { self.write::<u16>(0x04, command | (1 << 1)) }
-    }
-
-    pub fn enable_bus_mastering(&self) {
-        let command = unsafe { self.read::<u16>(0x04) };
-        unsafe { self.write::<u16>(0x04, command | (1 << 2)) }
-    }
-}
-
-static mut DEVICES: BTreeMap<PciAddress, PciDevice> = BTreeMap::new();
-
-pub fn get_devices() -> &'static BTreeMap<PciAddress, PciDevice> {
-    unsafe { &DEVICES }
+pub fn get_devices() -> RwLockReadGuard<'static, BTreeMap<PciAddress, PciDevice>> {
+    DEVICES.read()
 }
 
 pub fn init(physical_offset: u64) {
@@ -245,9 +191,7 @@ pub fn init(physical_offset: u64) {
 
     let mut devices = resolver.resolve();
 
-    unsafe {
-        DEVICES.append(&mut devices);
-    }
+    DEVICES.write().append(&mut devices);
 
     println!("[PCI] initialized");
 }

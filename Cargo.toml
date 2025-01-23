@@ -8,6 +8,7 @@ members = [
   "crates/e9",
   "crates/hpet",
 ]
+exclude = ["programs"]
 
 [workspace.dependencies]
 mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }

@@ -23,9 +23,14 @@ snalloc = { path = "../crates/snalloc" }
 embedded-graphics = "0.8"
 pin-project = "1.1"
 bitflags = "2.4"
-smoltcp = { version = "0.10", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ethernet", "socket-tcp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns"] }
+smoltcp = { version = "0.11", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ethernet", "socket-tcp", "socket-icmp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns"] }
 chrono = { version = "0.4", default-features = false }
 libm = "0.2"
+unique = "0.9"
+wasmi = { version = "0.31", default-features = false }
+xmas-elf = "0.9"
+unwinding = { git = "https://github.com/nbdd0121/unwinding.git", rev = "d7cd46e009ed1dbc762dbaaf4402f57973b300bb", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
+limine = "0.1"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
@@ -34,14 +39,14 @@ acpi = { git = "https://github.com/devsnek/acpi.git", rev = "4d8317aca9b484e83e5
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"
-xmas-elf = "0.9"
 cmos = { path = "../crates/cmos" }
 i8042 = { path = "../crates/i8042" }
 e9 = { path = "../crates/e9" }
 hpet = { path = "../crates/hpet" }
-unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
 lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
-limine = "0.1"
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }
+
+[features]
+work-stealing = []

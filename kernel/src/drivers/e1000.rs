@@ -162,19 +162,6 @@ enum Error {
     NoEeprom,
 }
 
-struct E1000 {
-    base: VirtAddr,
-    address: smoltcp::wire::EthernetAddress,
-
-    tx_cur: usize,
-    tx_ring: *mut [TxDescriptor; TX_DESC_NUM as usize],
-
-    rx_cur: usize,
-    rx_ring: *mut [RxDescriptor; RX_DESC_NUM as usize],
-
-    interrupt_guard: Option<crate::arch::InterruptGuard>,
-}
-
 #[derive(Debug)]
 #[repr(C, packed)]
 struct TxDescriptor {
@@ -236,164 +223,36 @@ const TX_DESC_SIZE: u32 = TX_DESC_NUM * core::mem::size_of::<TxDescriptor>() as 
 const RX_DESC_NUM: u32 = 32;
 const RX_DESC_SIZE: u32 = RX_DESC_NUM * core::mem::size_of::<RxDescriptor>() as u32;
 
-impl E1000 {
-    fn new(header: &PciDevice) -> Result<Pin<Box<Self>>, Error> {
-        header.enable_bus_mastering();
-        header.enable_mmio();
+#[derive(Debug, Clone, Copy)]
+struct Registers {
+    base: VirtAddr,
+}
 
-        let registers_addr = match header.bars[0] {
-            Some(Bar::Memory64 { address, .. }) => PhysAddr::new(address),
-            Some(Bar::Memory32 { address, .. }) => PhysAddr::new(address as u64),
-            _ => return Err(Error::UnknownBar),
-        };
-
-        let mut this = Box::new(Self {
-            base: VirtAddr::new(registers_addr.as_u64() + header.physical_offset as u64),
-            address: smoltcp::wire::EthernetAddress([0; 6]),
-
-            tx_cur: 0,
-            tx_ring: core::ptr::null_mut(),
-
-            rx_cur: 0,
-            rx_ring: core::ptr::null_mut(),
-
-            interrupt_guard: None,
-        });
-
-        this.reset();
-
-        if !this.detect_eeprom() {
-            return Err(Error::NoEeprom);
-        }
-
-        for i in 0..3 {
-            let x = this.read_eeprom(i) as u16;
-            this.address.0[i as usize * 2] = (x & 0xff) as u8;
-            this.address.0[i as usize * 2 + 1] = (x >> 8) as u8;
-        }
-
-        this.init_tx()?;
-        this.init_rx()?;
-
-        for i in 0..128 {
-            this.write_raw(0x5200 + i * 4, 0);
-        }
-
-        this.write(
-            Register::IMask,
-            (InterruptFlags::TXDW
-                | InterruptFlags::TXQE
-                | InterruptFlags::LSC
-                | InterruptFlags::RXDMT0
-                | InterruptFlags::DSW
-                | InterruptFlags::RXO
-                | InterruptFlags::RXT0
-                | InterruptFlags::MDAC
-                | InterruptFlags::PHYINT
-                | InterruptFlags::LSECPN
-                | InterruptFlags::TXD_LOW
-                | InterruptFlags::SRPD
-                | InterruptFlags::ACK
-                | InterruptFlags::ECCER)
-                .bits(),
-        );
-        this.read(Register::ICause);
-
-        let this_raw = &mut *this as *mut E1000;
-        let mut this = Box::into_pin(this);
-
-        let gsi = crate::arch::pci_route_pin(header);
-        this.interrupt_guard = Some(crate::arch::set_interrupt_dyn(
-            gsi,
-            crate::arch::InterruptType::LevelLow,
-            Box::new(move || {
-                let this = unsafe { &mut *this_raw };
-                this.handle_irq();
-            }),
-        ));
-
-        this.link_up();
-
-        Ok(this)
+impl Registers {
+    fn remove_flags(&self, register: Register, flag: u32) {
+        self.write(register, self.read(register) & !flag);
     }
 
-    fn init_tx(&mut self) -> Result<(), Error> {
-        let addr = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
-
-        let descriptors = unsafe { &mut *(addr as *mut [TxDescriptor; TX_DESC_NUM as usize]) };
-
-        for desc in descriptors {
-            *desc = TxDescriptor {
-                addr: PhysAddr::zero(),
-                length: 0,
-                cso: 0,
-                cmd: TxCommand::empty(),
-                status: TStatus::empty(),
-                css: 0,
-                special: 0,
-            };
-        }
-
-        self.tx_ring = addr as _;
-        let phys = translate_virt_addr(VirtAddr::new(self.tx_ring as _)).unwrap();
-
-        self.write(Register::TxDesLo, phys.as_u64() as _);
-        self.write(Register::TxDesHi, (phys.as_u64() >> 32) as _);
-        self.write(Register::TxDescLen, TX_DESC_SIZE);
-        self.write(Register::TxDescHead, 0);
-        self.write(Register::TxDescTail, 0);
-
-        let mut flags = TCtl::from_bits_retain(1 << 28) | TCtl::EN | TCtl::PSP | TCtl::RTLC;
-        flags.set_collision_distance(64);
-        flags.set_collision_threshold(15);
-
-        self.write(Register::TCtrl, flags.bits());
-
-        // TODO: TIPG register
-
-        Ok(())
+    fn insert_flags(&self, register: Register, flag: u32) {
+        self.write(register, self.read(register) | flag);
     }
 
-    fn init_rx(&mut self) -> Result<(), Error> {
-        let addr = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
-
-        let descriptors = unsafe { &mut *(addr as *mut [RxDescriptor; RX_DESC_NUM as usize]) };
-
-        for desc in descriptors {
-            let recv_buffer = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
-
-            *desc = RxDescriptor {
-                addr: translate_virt_addr(VirtAddr::new(recv_buffer as _)).unwrap(),
-                length: 0,
-                checksum: 0,
-                status: RStatus::empty(),
-                errors: 0,
-                special: 0,
-            };
+    fn read(&self, register: Register) -> u32 {
+        unsafe {
+            let register = self.base.as_ptr::<u8>().add(register as usize);
+            core::ptr::read_volatile(register as *const u32)
         }
+    }
 
-        self.rx_ring = addr as _;
-        let phys = translate_virt_addr(VirtAddr::new(self.rx_ring as _)).unwrap();
+    fn write(&self, register: Register, value: u32) {
+        self.write_raw(register as _, value);
+    }
 
-        self.write(Register::RxDescLo, phys.as_u64() as _);
-        self.write(Register::RxDescHi, (phys.as_u64() >> 32) as _);
-        self.write(Register::RxDescLen, RX_DESC_SIZE);
-        self.write(Register::RxDescHead, 0);
-        self.write(Register::RxDescTail, RX_DESC_NUM - 1);
-
-        let flags = RCtl::EN
-            | RCtl::SBP
-            | RCtl::UPE
-            | RCtl::LPE
-            | RCtl::MPE
-            | RCtl::LBM_NONE
-            | RCtl::RDMTS_EIGHTH
-            | RCtl::BAM
-            | RCtl::SECRC
-            | RCtl::BSIZE_4096;
-
-        self.write(Register::RCtrl, flags.bits());
-        Ok(())
+    fn write_raw(&self, register: u32, value: u32) {
+        unsafe {
+            let register = self.base.as_mut_ptr::<u8>().add(register as usize);
+            core::ptr::write_volatile(register as *mut u32, value);
+        }
     }
 
     fn detect_eeprom(&self) -> bool {
@@ -440,17 +299,191 @@ impl E1000 {
     fn status(&self) -> Status {
         Status::from_bits(self.read(Register::Status))
     }
+}
+
+struct E1000 {
+    registers: Registers,
+    address: smoltcp::wire::EthernetAddress,
+
+    tx_cur: usize,
+    tx_ring: *mut [TxDescriptor; TX_DESC_NUM as usize],
+
+    rx_cur: usize,
+    rx_ring: *mut [RxDescriptor; RX_DESC_NUM as usize],
+
+    interrupt_guard: Option<crate::arch::InterruptGuard>,
+}
+
+impl E1000 {
+    fn new(header: &PciDevice) -> Result<Pin<Box<Self>>, Error> {
+        header.enable_bus_mastering();
+        header.enable_mmio();
+
+        let registers_addr = match header.bars[0] {
+            Some(Bar::Memory64 { address, .. }) => PhysAddr::new(address),
+            Some(Bar::Memory32 { address, .. }) => PhysAddr::new(address as u64),
+            _ => return Err(Error::UnknownBar),
+        };
+
+        let registers = Registers {
+            base: VirtAddr::new(registers_addr.as_u64() + header.physical_offset as u64),
+        };
+
+        registers.reset();
+
+        if !registers.detect_eeprom() {
+            return Err(Error::NoEeprom);
+        }
+
+        let mut address = smoltcp::wire::EthernetAddress([0; 6]);
+        for i in 0..3 {
+            let x = registers.read_eeprom(i) as u16;
+            address.0[i as usize * 2] = (x & 0xff) as u8;
+            address.0[i as usize * 2 + 1] = (x >> 8) as u8;
+        }
+
+        let tx_ring = {
+            let addr = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
+
+            let descriptors = unsafe { &mut *(addr as *mut [TxDescriptor; TX_DESC_NUM as usize]) };
+
+            for desc in descriptors {
+                *desc = TxDescriptor {
+                    addr: PhysAddr::zero(),
+                    length: 0,
+                    cso: 0,
+                    cmd: TxCommand::empty(),
+                    status: TStatus::empty(),
+                    css: 0,
+                    special: 0,
+                };
+            }
+
+            let phys = translate_virt_addr(VirtAddr::new(addr as _)).unwrap();
+
+            registers.write(Register::TxDesLo, phys.as_u64() as _);
+            registers.write(Register::TxDesHi, (phys.as_u64() >> 32) as _);
+            registers.write(Register::TxDescLen, TX_DESC_SIZE);
+            registers.write(Register::TxDescHead, 0);
+            registers.write(Register::TxDescTail, 0);
+
+            let mut flags = TCtl::from_bits_retain(1 << 28) | TCtl::EN | TCtl::PSP | TCtl::RTLC;
+            flags.set_collision_distance(64);
+            flags.set_collision_threshold(15);
+
+            registers.write(Register::TCtrl, flags.bits());
+
+            addr
+        };
+
+        let rx_ring = {
+            let addr = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
+
+            let descriptors = unsafe { &mut *(addr as *mut [RxDescriptor; RX_DESC_NUM as usize]) };
+
+            for desc in descriptors {
+                let recv_buffer = unsafe { alloc(Layout::from_size_align(4096, 4096).unwrap()) };
+
+                *desc = RxDescriptor {
+                    addr: translate_virt_addr(VirtAddr::new(recv_buffer as _)).unwrap(),
+                    length: 0,
+                    checksum: 0,
+                    status: RStatus::empty(),
+                    errors: 0,
+                    special: 0,
+                };
+            }
+
+            let phys = translate_virt_addr(VirtAddr::new(addr as _)).unwrap();
+
+            registers.write(Register::RxDescLo, phys.as_u64() as _);
+            registers.write(Register::RxDescHi, (phys.as_u64() >> 32) as _);
+            registers.write(Register::RxDescLen, RX_DESC_SIZE);
+            registers.write(Register::RxDescHead, 0);
+            registers.write(Register::RxDescTail, RX_DESC_NUM - 1);
+
+            let flags = RCtl::EN
+                | RCtl::SBP
+                | RCtl::UPE
+                | RCtl::LPE
+                | RCtl::MPE
+                | RCtl::LBM_NONE
+                | RCtl::RDMTS_EIGHTH
+                | RCtl::BAM
+                | RCtl::SECRC
+                | RCtl::BSIZE_4096;
+
+            registers.write(Register::RCtrl, flags.bits());
+
+            addr
+        };
+
+        for i in 0..128 {
+            registers.write_raw(0x5200 + i * 4, 0);
+        }
+
+        registers.write(
+            Register::IMask,
+            (InterruptFlags::TXDW
+                | InterruptFlags::TXQE
+                | InterruptFlags::LSC
+                | InterruptFlags::RXDMT0
+                | InterruptFlags::DSW
+                | InterruptFlags::RXO
+                | InterruptFlags::RXT0
+                | InterruptFlags::MDAC
+                | InterruptFlags::PHYINT
+                | InterruptFlags::LSECPN
+                | InterruptFlags::TXD_LOW
+                | InterruptFlags::SRPD
+                | InterruptFlags::ACK
+                | InterruptFlags::ECCER)
+                .bits(),
+        );
+        registers.read(Register::ICause);
+
+        let mut this = Box::new(Self {
+            registers,
+            address,
+
+            tx_cur: 0,
+            tx_ring: tx_ring as _,
+
+            rx_cur: 0,
+            rx_ring: rx_ring as _,
+
+            interrupt_guard: None,
+        });
+
+        let this_raw = &mut *this as *mut E1000;
+        let mut this = Box::into_pin(this);
+
+        let gsi = crate::arch::pci_route_pin(header);
+        this.interrupt_guard = Some(crate::arch::set_interrupt_dyn(
+            gsi,
+            crate::arch::InterruptType::LevelLow,
+            Box::new(move || {
+                let this = unsafe { &mut *this_raw };
+                this.handle_irq();
+            }),
+        ));
+
+        this.link_up();
+
+        Ok(this)
+    }
 
     fn link_up(&self) {
-        self.insert_flags(Register::Control, ECtl::SLU.bits());
+        self.registers
+            .insert_flags(Register::Control, ECtl::SLU.bits());
 
-        while !self.status().get(Status::LU) {
+        while !self.registers.status().get(Status::LU) {
             core::hint::spin_loop();
         }
     }
 
     fn handle_irq(&mut self) {
-        InterruptFlags::from_bits_retain(self.read(Register::ICause));
+        InterruptFlags::from_bits_retain(self.registers.read(Register::ICause));
     }
 
     fn send(&mut self, packet: &[u8]) {
@@ -464,7 +497,8 @@ impl E1000 {
 
         self.tx_cur = (self.tx_cur + 1) % TX_DESC_NUM as usize;
 
-        self.write(Register::TxDescTail, self.tx_cur as u32);
+        self.registers
+            .write(Register::TxDescTail, self.tx_cur as u32);
     }
 
     fn recv(&mut self) -> Option<(usize, *mut [u8])> {
@@ -478,7 +512,7 @@ impl E1000 {
         Some((
             id,
             core::ptr::from_raw_parts_mut(
-                translate_phys_addr(desc.addr).as_u64() as _,
+                translate_phys_addr(desc.addr).as_u64() as *mut u8,
                 desc.length as usize,
             ),
         ))
@@ -493,7 +527,7 @@ impl E1000 {
 
         let old = self.rx_cur;
         self.rx_cur = (self.rx_cur + 1) % RX_DESC_NUM as usize;
-        self.write(Register::RxDescTail, old as u32);
+        self.registers.write(Register::RxDescTail, old as u32);
     }
 
     fn rx_ring(&mut self) -> &mut [RxDescriptor] {
@@ -502,32 +536,6 @@ impl E1000 {
 
     fn tx_ring(&mut self) -> &mut [TxDescriptor] {
         unsafe { &mut *self.tx_ring }
-    }
-
-    fn remove_flags(&self, register: Register, flag: u32) {
-        self.write(register, self.read(register) & !flag);
-    }
-
-    fn insert_flags(&self, register: Register, flag: u32) {
-        self.write(register, self.read(register) | flag);
-    }
-
-    fn read(&self, register: Register) -> u32 {
-        unsafe {
-            let register = self.base.as_ptr::<u8>().add(register as usize);
-            core::ptr::read_volatile(register as *const u32)
-        }
-    }
-
-    fn write(&self, register: Register, value: u32) {
-        self.write_raw(register as _, value);
-    }
-
-    fn write_raw(&self, register: u32, value: u32) {
-        unsafe {
-            let register = self.base.as_mut_ptr::<u8>().add(register as usize);
-            core::ptr::write_volatile(register as *mut u32, value);
-        }
     }
 }
 
@@ -559,7 +567,7 @@ pub struct Driver {
 
 impl crate::net::Driver for Driver {
     fn address(&self) -> smoltcp::wire::HardwareAddress {
-        self.inner.lock().address.into()
+        crate::arch::without_interrupts(|| self.inner.lock().address.into())
     }
 }
 
@@ -613,8 +621,10 @@ impl smoltcp::phy::Device for Driver {
         &mut self,
         _timestamp: smoltcp::time::Instant,
     ) -> Option<(Self::RxToken<'_>, Self::TxToken<'_>)> {
-        let mut e1000 = self.inner.lock();
-        let (id, buffer) = e1000.recv()?;
+        let (id, buffer) = crate::arch::without_interrupts(|| {
+            let mut e1000 = self.inner.lock();
+            e1000.recv()
+        })?;
         Some((
             RxToken {
                 id,

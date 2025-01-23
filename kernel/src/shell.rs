@@ -1,5 +1,4 @@
-use crate::drivers::i8042::next_key;
-use i8042::{DecodedKey, KeyCode};
+use crate::drivers::keyboard::{next_key, DecodedKey, KeyCode};
 
 fn run(line: &str) {
     if line == "shutdown" {
@@ -19,9 +18,14 @@ fn run(line: &str) {
         });
         return;
     }
-    if line == "timing" {
-        crate::task::spawn(async {
-            for _ in 0..30 {
+    if line.starts_with("timing") {
+        let n = line
+            .strip_prefix("timing ")
+            .unwrap()
+            .parse::<u32>()
+            .unwrap();
+        crate::task::spawn(async move {
+            for _ in 0..n {
                 let uptime = crate::arch::now();
                 let unix = crate::arch::timestamp();
                 println!("{uptime:?} {unix:?}");
@@ -35,6 +39,14 @@ fn run(line: &str) {
         crate::net::test_task(host.to_string());
         return;
     }
+    /*
+    if line == "wasm" {
+        let wasm =
+            include_bytes!("../../programs/wasm_test/target/wasm32-wasi/release/wasm_test.wasm");
+        crate::wasm::run(wasm);
+        return;
+    }
+    */
     println!("unknown command");
 }
 

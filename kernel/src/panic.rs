@@ -4,9 +4,9 @@ use core::{
     panic::PanicInfo,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use limine::{KernelAddressRequest, KernelFileRequest};
 use rustc_demangle::demangle;
 use unwinding::abi::{UnwindContext, UnwindReasonCode, _Unwind_Backtrace, _Unwind_GetIP};
-use x86_64::VirtAddr;
 use xmas_elf::{
     program::Type as ProgramType,
     sections::{SectionData, ShType},
@@ -14,15 +14,29 @@ use xmas_elf::{
     ElfFile,
 };
 
+static KERNEL_FILE: KernelFileRequest = KernelFileRequest::new(0);
+static KERNEL_ADDRESS: KernelAddressRequest = KernelAddressRequest::new(0);
 static PANIC_COUNT: Local<AtomicUsize> = Local::new(|| AtomicUsize::new(0));
 static mut KERNEL_SLICE: &[u8] = &[];
-static mut KERNEL_BASE: usize = 0;
+static KERNEL_BASE: AtomicUsize = AtomicUsize::new(0);
 
-pub fn init(kernel_slice: &'static [u8], kernel_base: VirtAddr) {
+pub fn init() {
+    let kernel_file = KERNEL_FILE
+        .get_response()
+        .get()
+        .unwrap()
+        .kernel_file
+        .get()
+        .unwrap();
+
+    let kernel_file_base = kernel_file.base.as_ptr().unwrap();
+
     unsafe {
-        KERNEL_SLICE = kernel_slice;
-        KERNEL_BASE = kernel_base.as_u64() as _;
+        KERNEL_SLICE = core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _);
     }
+
+    let kernel_address = KERNEL_ADDRESS.get_response().get().unwrap();
+    KERNEL_BASE.store(kernel_address.virtual_base as _, Ordering::Relaxed);
 }
 
 struct PanicData {
@@ -46,12 +60,13 @@ fn panic(info: &PanicInfo) -> ! {
     }
 
     let mut stack_frames = Vec::new();
-    stack_trace(32, |frame| {
+    stack_trace(16, |frame| {
         stack_frames.push(frame);
     });
 
     if !info.can_unwind() {
         println!("UNHANDLED (no-unwind) {}", info);
+        e9::println!("UNHANDLED (no-unwind) {}", info);
         print_stack_frames(&stack_frames);
         crate::arch::halt_loop();
     }
@@ -156,7 +171,7 @@ where
             Some(h.virtual_addr() as usize)
         })
         .unwrap_or(0xffffffff80000000);
-    let load_base = unsafe { KERNEL_BASE };
+    let load_base = KERNEL_BASE.load(Ordering::SeqCst);
     let offset = load_base - link_base;
 
     let get_symbol = |addr: usize| -> Option<(usize, &'static str)> {

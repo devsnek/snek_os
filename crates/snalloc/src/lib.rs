@@ -24,6 +24,10 @@ impl Inner {
         let needed = layout.size().max(layout.align());
         self.slabs.iter_mut().find(|slab| slab.size >= needed)
     }
+
+    fn used(&self) -> usize {
+        self.slabs.iter().fold(0, |acc, s| s.used + acc) + self.fallback.used()
+    }
 }
 
 impl Allocator {
@@ -59,6 +63,10 @@ impl Allocator {
         unsafe {
             inner.fallback.init(start as _, region_size);
         }
+    }
+
+    pub fn used(&self) -> usize {
+        self.inner.lock().used()
     }
 }
 
@@ -100,6 +108,7 @@ struct SlabAllocator {
     end: usize,
     next: usize,
     size: usize,
+    used: usize,
 }
 
 impl SlabAllocator {
@@ -109,6 +118,7 @@ impl SlabAllocator {
             end: 0,
             next: 0,
             size,
+            used: 0,
         }
     }
 
@@ -135,6 +145,8 @@ impl SlabAllocator {
             cell_next
         };
 
+        self.used += layout.size();
+
         cell as *mut u8
     }
 
@@ -145,5 +157,7 @@ impl SlabAllocator {
         let cell = ptr as *mut SlabCell;
         (*cell).next = self.next;
         self.next = cell as usize;
+
+        self.used -= layout.size();
     }
 }

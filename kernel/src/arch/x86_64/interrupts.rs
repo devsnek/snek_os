@@ -3,7 +3,11 @@ use acpi::{
     platform::interrupt::{Apic as ApicInfo, Polarity, TriggerMode},
     InterruptModel, PlatformInfo,
 };
-use core::{cmp::Ordering, time::Duration};
+use core::{
+    cmp::Ordering,
+    sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
+    time::Duration,
+};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
 use x2apic::{
@@ -59,6 +63,9 @@ static mut INTERRUPT_HANDLERS: [InterruptHandler; 224] = [const { InterruptHandl
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
+
+        idt.non_maskable_interrupt.set_handler_fn(non_maskable_handler);
+
         idt.breakpoint.set_handler_fn(breakpoint_handler);
 
         unsafe {
@@ -330,6 +337,12 @@ lazy_static! {
     };
 }
 
+extern "x86-interrupt" fn non_maskable_handler(_stack_frame: InterruptStackFrame) {
+    prologue!();
+
+    epilogue!();
+}
+
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     prologue!();
 
@@ -450,14 +463,14 @@ extern "x86-interrupt" fn spurious_interrupt_handler(_stack_frame: InterruptStac
     epilogue!();
 }
 
-static mut LAPIC_ADDRESS: usize = 0;
+static LAPIC_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 
 fn get_lapic() -> LocalApic {
     LocalApicBuilder::new()
         .timer_vector(LOCAL_APIC_TIMER)
         .error_vector(LOCAL_APIC_ERROR)
         .spurious_vector(LOCAL_APIC_SPURIOUS)
-        .set_xapic_base(unsafe { LAPIC_ADDRESS } as _)
+        .set_xapic_base(LAPIC_ADDRESS.load(AtomicOrdering::SeqCst) as _)
         .build()
         .unwrap()
 }
@@ -479,14 +492,16 @@ fn init_lapic() {
     println!("[LAPIC] initialized");
 }
 
+#[derive(Debug)]
 struct IoApicWithInfo {
     io_apic: IoApic,
     global_system_interrupt_base: u8,
 }
 
 static mut IO_APICS: [Option<IoApicWithInfo>; 32] = [const { None }; 32];
+
 fn get_io_apic(gsi: u8) -> &'static mut IoApicWithInfo {
-    for io_apic in unsafe { &mut IO_APICS } {
+    for io_apic in unsafe { &mut *core::ptr::addr_of_mut!(IO_APICS) } {
         let Some(io_apic) = io_apic else {
             continue;
         };
@@ -510,13 +525,17 @@ fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
         let mut io_apic = unsafe { IoApic::new(io_apic_virtual_address.as_u64()) };
 
         unsafe {
-            io_apic.init(IOAPIC_START);
+            io_apic.init(IOAPIC_START + io_apic_info.global_system_interrupt_base as u8);
         }
 
         for i in 0..unsafe { io_apic.max_table_entry() } {
             let mut entry = unsafe { io_apic.table_entry(i) };
             entry.set_flags(entry.flags() | IrqFlags::MASKED);
-            entry.set_vector(IOAPIC_START + i);
+
+            if i == 2 && io_apic_info.global_system_interrupt_base == 0 {
+                entry.set_dest(255);
+            }
+
             unsafe {
                 io_apic.set_table_entry(i, entry);
             }
@@ -633,9 +652,7 @@ pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
 
     IDT.load();
 
-    unsafe {
-        LAPIC_ADDRESS = apic_info.local_apic_address as _;
-    }
+    LAPIC_ADDRESS.store(apic_info.local_apic_address as _, AtomicOrdering::Relaxed);
     init_lapic();
 
     init_ioapic(apic_info);

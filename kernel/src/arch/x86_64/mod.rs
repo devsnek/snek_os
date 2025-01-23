@@ -11,17 +11,12 @@ mod pit;
 mod stack_allocator;
 mod time;
 
-use limine::{
-    FramebufferRequest, HhdmRequest, KernelAddressRequest, KernelFileRequest, MemmapRequest,
-    RsdpRequest, SmpInfo, SmpRequest,
-};
+use limine::{FramebufferRequest, HhdmRequest, MemmapRequest, RsdpRequest, SmpInfo, SmpRequest};
 use x86_64::{registers::model_specific::Msr, VirtAddr};
 
 static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 static HHDM: HhdmRequest = HhdmRequest::new(0);
 static MEMMAP: MemmapRequest = MemmapRequest::new(0);
-static KERNEL_FILE: KernelFileRequest = KernelFileRequest::new(0);
-static KERNEL_ADDRESS: KernelAddressRequest = KernelAddressRequest::new(0);
 static RSDP: RsdpRequest = RsdpRequest::new(0);
 static SMP: SmpRequest = SmpRequest::new(0);
 
@@ -38,7 +33,7 @@ fn start() -> ! {
     if let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() {
         if framebuffer_response.framebuffer_count > 0 {
             let framebuffer = &framebuffer_response.framebuffers()[0];
-            framebuffer::init(framebuffer);
+            framebuffer::early_init(framebuffer);
         }
     }
 
@@ -51,22 +46,7 @@ fn start() -> ! {
 
     memory::init(physical_memory_offset, memmap);
 
-    let kernel_file = KERNEL_FILE
-        .get_response()
-        .get()
-        .unwrap()
-        .kernel_file
-        .get()
-        .unwrap();
-
-    let kernel_address = KERNEL_ADDRESS.get_response().get().unwrap();
-
-    let kernel_file_base = kernel_file.base.as_ptr().unwrap();
-
-    crate::panic::init(
-        unsafe { core::slice::from_raw_parts(kernel_file_base as _, kernel_file.length as _) },
-        VirtAddr::new(kernel_address.virtual_base),
-    );
+    crate::panic::init();
 
     {
         let acpi_allocator = acpi::AcpiAllocator::new();
@@ -78,6 +58,8 @@ fn start() -> ! {
     }
 
     allocator::init();
+
+    framebuffer::late_init();
 
     acpi::late_init();
 
@@ -92,19 +74,28 @@ fn start() -> ! {
     crate::main();
 }
 
-static mut BOOT_INFO: Option<Vec<Option<gdt::ApInfo>>> = None;
+struct ApInfo {
+    gdt: Option<gdt::ApInfo>,
+    wake: u8,
+}
+
+static mut AP_INFO: Option<Vec<ApInfo>> = None;
 
 pub fn init_smp() {
     let smp = SMP.get_response().get_mut().unwrap();
 
-    let mut infos = Vec::new();
-    for _ in 0..smp.cpus().len() {
-        // allocate on main thread because ap can't set up
-        // lazy allocation interrupt until it sets up gdt.
-        infos.push(Some(gdt::allocate_for_ap()));
-    }
+    // allocate on main thread because ap can't set up
+    // lazy allocation interrupt until it sets up gdt.
+    let infos = smp
+        .cpus()
+        .iter()
+        .map(|_| ApInfo {
+            gdt: Some(gdt::allocate_for_ap()),
+            wake: 0,
+        })
+        .collect();
     unsafe {
-        BOOT_INFO = Some(infos);
+        AP_INFO = Some(infos);
     }
 
     let bsp_lapic_id = smp.bsp_lapic_id;
@@ -129,7 +120,8 @@ fn start_smp(boot_info: &SmpInfo) -> ! {
     set_pid(boot_info.processor_id as _);
 
     gdt::init_smp(unsafe {
-        BOOT_INFO.as_mut().unwrap()[boot_info.processor_id as usize]
+        AP_INFO.as_mut().unwrap()[boot_info.processor_id as usize]
+            .gdt
             .take()
             .unwrap()
     });
@@ -180,9 +172,9 @@ pub use framebuffer::_print;
 pub use interrupts::{
     set_interrupt_dyn, set_interrupt_static, InterruptGuard, InterruptType, TIMER_INTERVAL,
 };
-pub use local::Local;
-pub use memory::{translate_phys_addr, translate_virt_addr};
-pub use pci::{get_devices as get_pci_devices, PciDevice};
+pub use local::GsLocalData as LocalData;
+pub use memory::{map_address, translate_phys_addr, translate_virt_addr};
+pub use pci::get_devices as get_pci_devices;
 pub use time::{now, timestamp};
 
 #[inline(always)]
@@ -194,7 +186,33 @@ pub fn halt_loop() -> ! {
 
 #[inline(always)]
 pub fn enable_interrupts_and_halt() {
-    x86_64::instructions::interrupts::enable_and_hlt();
+    if let Some(aps) = unsafe { AP_INFO.as_ref() } {
+        let pid = get_pid();
+        let addr = (&aps[pid as usize].wake) as *const u8;
+
+        unsafe {
+            asm!("
+            mov rcx, 0
+            mov rdx, 0
+            # rax set by `inout` below
+            monitor
+
+            mov rax, 0
+            mov rcx, 0
+            sti
+            mwait
+            ", in("rax") addr, out("rcx") _, out("rdx") _);
+        }
+    } else {
+        unsafe {
+            asm!(
+                "
+            sti
+            hlt
+            "
+            );
+        }
+    }
 }
 
 pub use x86_64::instructions::interrupts::disable as disable_interrupts;

@@ -1,4 +1,3 @@
-use snalloc::Allocator;
 use x86_64::{
     structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Translate},
     VirtAddr,
@@ -7,11 +6,8 @@ use x86_64::{
 pub const HEAP_START: usize = 0x4000_0000_0000;
 pub const HEAP_END: usize = 0x8000_0000_0000;
 
-#[global_allocator]
-pub static ALLOCATOR: Allocator = Allocator::new();
-
 pub fn init() {
-    ALLOCATOR.init(HEAP_START, HEAP_END - HEAP_START);
+    crate::arch::ALLOCATOR.init(HEAP_START, HEAP_END - HEAP_START);
 
     println!("[ALLOCATOR] initialized");
 }

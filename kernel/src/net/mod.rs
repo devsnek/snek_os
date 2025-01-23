@@ -60,9 +60,6 @@ impl<D: Driver> Interface<D> {
         match event {
             None => {}
             Some(smoltcp::socket::dhcpv4::Event::Configured(config)) => {
-                println!("DHCP config acquired!");
-
-                println!("IP address:      {}", config.address);
                 inner.iface.update_ip_addrs(|addrs| {
                     addrs.truncate(0);
                     addrs
@@ -71,24 +68,20 @@ impl<D: Driver> Interface<D> {
                 });
 
                 if let Some(router) = config.router {
-                    println!("Default gateway: {}", router);
                     inner
                         .iface
                         .routes_mut()
                         .add_default_ipv4_route(router)
                         .unwrap();
                 } else {
-                    println!("Default gateway: None");
                     inner.iface.routes_mut().remove_default_ipv4_route();
                 }
 
-                for (i, s) in config.dns_servers.into_iter().enumerate() {
-                    println!("DNS server {}:    {}", i, s);
+                for s in config.dns_servers.into_iter() {
                     inner.dns_servers.push(s.into());
                 }
             }
             Some(smoltcp::socket::dhcpv4::Event::Deconfigured) => {
-                println!("DHCP lost config!");
                 inner.iface.update_ip_addrs(|addrs| {
                     addrs.truncate(0);
                     addrs
@@ -143,6 +136,8 @@ where
     crate::task::spawn(async move {
         interface.run().await;
     });
+
+    println!("[NET] device registered");
 }
 
 pub fn test_task(host: String) {
@@ -165,7 +160,7 @@ async fn http_get(host: String, ip: smoltcp::wire::IpAddress) {
         inner.sockets.add(tcp_socket)
     };
 
-    println!("connecting");
+    // println!("connecting");
     {
         let inner = &mut *DEFAULT_DRIVER.get().unwrap().lock();
         let socket = inner.sockets.get_mut::<socket::tcp::Socket>(tcp_handle);

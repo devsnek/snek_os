@@ -1,8 +1,8 @@
 use super::{
     interrupts::{set_interrupt_static, InterruptType},
-    pci::PciDevice,
     stack_allocator::StackAllocator,
 };
+use crate::arch::PciDevice;
 use acpi::{
     fadt::Fadt,
     hpet::HpetInfo,

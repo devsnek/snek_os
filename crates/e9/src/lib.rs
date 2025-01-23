@@ -9,7 +9,7 @@ fn write_byte(b: u8) {
     }
     unsafe {
         core::arch::asm!(r#"
-        out 0e9h, al
+        out 0xe9, al
         "#, in("al") b);
     }
 }
@@ -19,7 +19,7 @@ pub fn _print(args: core::fmt::Arguments) {
     let mut b: u8;
     unsafe {
         core::arch::asm!(r#"
-        in al, 0e9h
+        in al, 0xe9
         "#, out("al") b);
     }
     if b != 0xe9 {

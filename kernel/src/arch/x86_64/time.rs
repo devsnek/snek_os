@@ -32,7 +32,7 @@ pub fn now() -> Duration {
     if let Some(counter) = counter {
         let period = super::hpet::get_counter_period().unwrap();
         let last = LAST_HPET.load(Ordering::SeqCst);
-        let fs = (counter - last) * period as u64;
+        let fs = counter.saturating_sub(last) * period as u64;
         now + Duration::from_nanos(fs / 1000000)
     } else {
         now

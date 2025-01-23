@@ -160,8 +160,7 @@ impl Executor {
         }
 
         if cfg!(feature = "work-stealing") {
-            let mut attempts = 0;
-            while attempts < MAX_STEAL_ATTEMPTS {
+            for _ in 0..MAX_STEAL_ATTEMPTS {
                 let active_cores = RUNTIME.active_cores();
 
                 if active_cores <= 1 {
@@ -178,19 +177,15 @@ impl Executor {
                     let num_steal =
                         core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
                     return victim.spawn_n(&self.scheduler, num_steal);
-                } else {
-                    attempts += 1;
                 }
             }
-
-            if let Ok(injector) = RUNTIME.injector.try_steal() {
-                injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK)
-            } else {
-                0
-            }
-        } else {
-            0
         }
+
+        if let Ok(injector) = RUNTIME.injector.try_steal() {
+            return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
+        }
+
+        0
     }
 }
 

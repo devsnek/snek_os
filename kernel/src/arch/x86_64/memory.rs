@@ -51,6 +51,16 @@ unsafe impl Send for BootInfoFrameAllocator {}
 
 impl BootInfoFrameAllocator {
     pub unsafe fn init(memory_regions: &'static [NonNullPtr<MemmapEntry>]) -> Self {
+        println!(
+            "Available memory {}b",
+            memory_regions
+                .iter()
+                .map(|p| &*p.as_ptr())
+                .filter(|r| r.typ == MemoryMapEntryType::Usable)
+                .map(|r| r.len)
+                .sum::<u64>()
+        );
+
         let iter = Box::new_in(
             memory_regions
                 .iter()
@@ -132,8 +142,7 @@ pub fn map_pages_from(start: PhysAddr, object_size: usize, region: PageRange) ->
     let num_pages =
         Bytes::new((end_frame_addr - start_frame_addr) as usize + 1).as_num_of_pages::<Size4KiB>();
 
-    let virt = search_free_addr_from(num_pages, region)
-        .expect("OOM during creating a new accessor to a register.");
+    let virt = search_free_addr_from(num_pages, region).unwrap();
 
     let mut mapper = super::memory::MAPPER.lock();
     let mapper = mapper.as_mut().unwrap();

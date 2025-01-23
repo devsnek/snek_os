@@ -11,17 +11,15 @@
 #![feature(allocator_api)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
-#![feature(inline_const)]
 #![feature(panic_can_unwind)]
-#![feature(core_panic)]
 #![feature(strict_provenance)]
-#![feature(trait_upcasting)]
 
 #[macro_use]
 extern crate lazy_static;
 extern crate alloc;
 
 mod prelude {
+    #![allow(unused)]
     pub use alloc::{
         borrow::ToOwned,
         boxed::Box,
@@ -46,6 +44,7 @@ mod net;
 mod panic;
 mod shell;
 mod task;
+mod wasm;
 
 pub fn main() -> ! {
     println!("Welcome to snek_os");
@@ -58,8 +57,7 @@ pub fn main() -> ! {
         arch::init_smp();
     });
 
-    task::start(0);
-    arch::halt_loop();
+    ap_main(0);
 }
 
 pub fn ap_main(ap_id: u8) -> ! {

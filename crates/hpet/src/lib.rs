@@ -5,7 +5,7 @@ use core::ptr::NonNull;
 use volatile::{access::ReadOnly, VolatilePtr};
 
 mycelium_bitfield::bitfield! {
-    struct CapabilitiesAndID<u64> {
+    pub struct CapabilitiesAndID<u64> {
         /// Function revision
         const REV_ID: u8;
         /// Number of timers
@@ -23,7 +23,7 @@ mycelium_bitfield::bitfield! {
 }
 
 mycelium_bitfield::bitfield! {
-    struct Configuration<u64> {
+    pub struct Configuration<u64> {
         /// false - halt counter and disable interrupts
         /// true - allow main counter to run and allow interrupts
         const ENABLE_CNF: bool;
@@ -34,7 +34,7 @@ mycelium_bitfield::bitfield! {
 }
 
 mycelium_bitfield::bitfield! {
-    struct InterruptStatus<u64> {
+    pub struct InterruptStatus<u64> {
         /// Tn_INT_STS 0-31
         const T_INT_STS: u32;
         const _RESERVED = 32;
@@ -42,7 +42,7 @@ mycelium_bitfield::bitfield! {
 }
 
 mycelium_bitfield::bitfield! {
-    struct ConfigurationAndCapabilities<u64> {
+    pub struct ConfigurationAndCapabilities<u64> {
         const _RESERVED0 = 1;
         const TN_INT_TYPE_CNF: bool;
         const TN_INT_ENB_CNF: bool;
@@ -64,24 +64,24 @@ mycelium_bitfield::bitfield! {
 #[derive(Debug)]
 #[repr(C)]
 pub struct Hpet {
-    capabilities_and_id: CapabilitiesAndID,
-    padding0: u64,
-    configuration: Configuration,
-    padding1: u64,
-    general_interrupt_status: InterruptStatus,
-    padding2: [u64; 25],
-    counter_value: u64,
-    padding3: u64,
-    timers: [HpetTimer; 32],
+    pub capabilities_and_id: CapabilitiesAndID,
+    pub padding0: u64,
+    pub configuration: Configuration,
+    pub padding1: u64,
+    pub general_interrupt_status: InterruptStatus,
+    pub padding2: [u64; 25],
+    pub counter_value: u64,
+    pub padding3: u64,
+    pub timers: [HpetTimer; 32],
 }
 
 /// Represents an HPET timer in memory.
 #[derive(Debug)]
 #[repr(C)]
 pub struct HpetTimer {
-    configuration_and_capabilities: ConfigurationAndCapabilities,
-    comparator_value: u64,
-    fsb_interrupt: u64,
+    pub configuration_and_capabilities: ConfigurationAndCapabilities,
+    pub comparator_value: u64,
+    pub fsb_interrupt: u64,
 }
 
 impl Hpet {
