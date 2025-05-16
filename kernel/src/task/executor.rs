@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-use crate::arch::Local;
+use crate::local::Local;
 use conquer_once::spin::OnceCell;
 use core::{
     any::Any,
@@ -105,7 +105,7 @@ impl Executor {
     fn tick(&mut self) -> bool {
         let tick = self.scheduler.tick();
 
-        super::timer::TIMER.advance_ticks(0);
+        super::timer::TIMER.turn();
 
         if tick.has_remaining {
             return true;
@@ -159,25 +159,23 @@ impl Executor {
             return injector.spawn_n(&self.scheduler, MAX_STOLEN_PER_TICK);
         }
 
-        if cfg!(feature = "work-stealing") {
-            for _ in 0..MAX_STEAL_ATTEMPTS {
-                let active_cores = RUNTIME.active_cores();
+        for _ in 0..MAX_STEAL_ATTEMPTS {
+            let active_cores = RUNTIME.active_cores();
 
-                if active_cores <= 1 {
-                    break;
-                }
+            if active_cores <= 1 {
+                break;
+            }
 
-                let victim_idx = self.rng.gen_range(0..active_cores);
+            let victim_idx = self.rng.gen_range(0..active_cores);
 
-                if victim_idx == self.id {
-                    continue;
-                }
+            if victim_idx == self.id {
+                continue;
+            }
 
-                if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
-                    let num_steal =
-                        core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
-                    return victim.spawn_n(&self.scheduler, num_steal);
-                }
+            if let Some(victim) = RUNTIME.try_steal_from(victim_idx) {
+                let num_steal =
+                    core::cmp::min(victim.initial_task_count() / 2, MAX_STOLEN_PER_TICK);
+                return victim.spawn_n(&self.scheduler, num_steal);
             }
         }
 
@@ -206,7 +204,7 @@ where
         match unwinding::panic::catch_unwind(|| f.poll(cx)) {
             Ok(v) => v.map(Ok),
             Err(e) => {
-                crate::panic::inspect(&*e);
+                crate::panic::inspect(&e);
                 Poll::Ready(Err(e))
             }
         }

@@ -5,18 +5,17 @@
 #![feature(alloc_error_handler)]
 #![feature(prelude_import)]
 #![feature(naked_functions)]
-#![feature(const_mut_refs)]
 #![feature(never_type)]
-#![feature(asm_const)]
 #![feature(allocator_api)]
 #![feature(ptr_metadata)]
 #![feature(slice_ptr_get)]
 #![feature(panic_can_unwind)]
-#![feature(strict_provenance)]
+#![feature(duration_millis_float)]
+
+extern crate alloc;
 
 #[macro_use]
-extern crate lazy_static;
-extern crate alloc;
+extern crate tracing;
 
 mod prelude {
     #![allow(unused)]
@@ -36,26 +35,35 @@ mod prelude {
 #[allow(unused_imports)]
 use prelude::*;
 
-#[macro_use]
-mod debug;
+mod allocator;
 mod arch;
+mod debug;
 mod drivers;
+mod framebuffer;
+mod local;
 mod net;
 mod panic;
 mod shell;
+mod stack_allocator;
 mod task;
-mod wasm;
 
-pub fn main() -> ! {
-    println!("Welcome to snek_os");
+#[no_mangle]
+unsafe extern "C" fn _start() -> ! {
+    crate::panic::catch_unwind(start);
+}
+
+fn start() -> ! {
+    debug::init();
+
+    framebuffer::early_init();
+
+    debug::set_print(framebuffer::print);
+
+    arch::init();
+
+    shell::start();
 
     drivers::init();
-
-    task::spawn(shell::shell());
-
-    task::spawn(async {
-        arch::init_smp();
-    });
 
     ap_main(0);
 }

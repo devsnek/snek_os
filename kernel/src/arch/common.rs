@@ -1,50 +1,39 @@
-use alloc::collections::btree_map::Entry;
-use core::sync::atomic::{AtomicUsize, Ordering};
 use pci_ids::{Device as DeviceInfo, Subclass as SubclassInfo};
-use pci_types::{Bar, PciAddress};
-use snalloc::Allocator;
-use spin::Lazy;
+use pci_types::{capability::PciCapability, Bar, PciAddress};
 
-#[global_allocator]
-pub static ALLOCATOR: Allocator = Allocator::new();
-
-pub struct Local<T> {
-    id: Lazy<usize>,
-    initializer: fn() -> T,
-}
-
-impl<T: 'static> Local<T> {
-    pub const fn new(initializer: fn() -> T) -> Self {
-        Self {
-            id: Lazy::new(Self::next_id),
-            initializer,
-        }
-    }
-
-    fn next_id() -> usize {
-        static ID: AtomicUsize = AtomicUsize::new(0);
-        ID.fetch_add(1, Ordering::Relaxed)
-    }
-
-    pub fn with<U, F>(&self, f: F) -> U
-    where
-        F: FnOnce(&T) -> U,
-    {
-        let local = super::LocalData::get().expect("failed to load GsLocalData");
-        let ptr = match local.data.lock().entry(*self.id) {
-            Entry::Occupied(e) => *e.get(),
-            Entry::Vacant(v) => {
-                let ptr = Box::into_raw(Box::new((self.initializer)())) as *mut ();
-                v.insert(ptr);
-                ptr
-            }
-        };
-        let data = unsafe { &*(ptr as *const T) };
-        f(data)
+bitflags::bitflags! {
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+    pub struct PciCommand: u16 {
+        const IO_SPACE = 1 << 0;
+        const MEMORY_SPACE = 1 << 1;
+        const BUS_MASTER = 1 << 2;
+        const SPECIAL_CYCLES = 1 << 3;
+        const MEMORY_WRITE_AND_INVALIDATE_ENABLE = 1 << 4;
+        const VGA_PALETTE_SNOOP = 1 << 5;
+        const PARITY_ERROR_RESPONSE = 1 << 6;
+        const SERR_ENABLE = 1 << 8;
+        const FAST_BACK_TO_BACK_ENABLE = 1 << 9;
+        const INTERRUPT_DISABLE = 1 << 10;
     }
 }
 
-#[derive(Debug)]
+bitflags::bitflags! {
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+    pub struct PciStatus: u16 {
+        const INTERRUPT_STATUS = 1 << 3;
+        const CAPABILITIES_LIST = 1 << 4;
+        const MHZ_66_CAPABLE = 1 << 5;
+        const FAST_BACK_TO_BACK_CAPABLE = 1 << 7;
+        const MASTER_DATA_PARITY_ERROR = 1 << 8;
+        const SIGNALED_TARGET_ABORT = 1 << 11;
+        const RECEIVED_TARGET_ABORT = 1 << 12;
+        const RECEIVED_MASTER_ABORT = 1 << 13;
+        const SIGNALED_SYSTEM_ERROR = 1 << 14;
+        const DETECTED_PARITY_ERROR = 1 << 15;
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct PciDevice {
     pub physical_offset: usize,
     pub configuration_address: usize,
@@ -60,6 +49,7 @@ pub struct PciDevice {
     pub bars: [Option<Bar>; 6],
     pub interrupt_pin: u8,
     pub interrupt_line: u8,
+    pub capabilities: Vec<PciCapability>,
 }
 
 impl PciDevice {
@@ -80,21 +70,31 @@ impl PciDevice {
         }
     }
 
-    unsafe fn read<T: Sized + Copy>(&self, offset: u16) -> T {
+    pub unsafe fn read<T: Sized + Copy>(&self, offset: u16) -> T {
         ((self.configuration_address + offset as usize) as *const T).read_volatile()
     }
 
-    unsafe fn write<T: Sized + Copy>(&self, offset: u16, value: T) {
+    pub unsafe fn write<T: Sized + Copy>(&self, offset: u16, value: T) {
         ((self.configuration_address + offset as usize) as *mut T).write_volatile(value)
     }
 
-    pub fn enable_mmio(&self) {
-        let command = unsafe { self.read::<u16>(0x04) };
-        unsafe { self.write::<u16>(0x04, command | (1 << 1)) }
+    pub fn command(&self) -> PciCommand {
+        PciCommand::from_bits_truncate(unsafe { self.read::<u16>(0x04) })
     }
 
-    pub fn enable_bus_mastering(&self) {
-        let command = unsafe { self.read::<u16>(0x04) };
-        unsafe { self.write::<u16>(0x04, command | (1 << 2)) }
+    pub fn set_command(&self, cmd: PciCommand) {
+        unsafe { self.write(0x04, cmd) }
+    }
+
+    pub fn status(&self) -> PciStatus {
+        PciStatus::from_bits_truncate(unsafe { self.read::<u16>(0x06) })
+    }
+
+    pub fn capabilities_offset(&self) -> Option<u8> {
+        if self.status().contains(PciStatus::CAPABILITIES_LIST) {
+            Some((unsafe { self.read::<u32>(0x34) } & 0xFC) as u8)
+        } else {
+            None
+        }
     }
 }

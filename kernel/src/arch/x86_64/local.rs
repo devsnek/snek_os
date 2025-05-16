@@ -50,5 +50,5 @@ pub fn init() {
         KernelGsBase::write(VirtAddr::new(ptr as u64));
     }
 
-    println!("[LOCAL] initialized");
+    debug!("[LOCAL] initialized");
 }

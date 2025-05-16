@@ -1,4 +1,4 @@
-use super::stack_allocator::StackAllocator;
+use crate::stack_allocator::StackAllocator;
 use limine::{MemmapEntry, MemoryMapEntryType, NonNullPtr};
 use os_units::{Bytes, NumOfPages};
 use spin::Mutex;
@@ -11,7 +11,7 @@ use x86_64::{
     PhysAddr, VirtAddr,
 };
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref MAPPER: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
     pub static ref FRAME_ALLOCATOR_ALLOCATOR: StackAllocator::<2048> = StackAllocator::new();
     pub static ref FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
@@ -28,7 +28,7 @@ pub fn init(physical_memory_offset: u64, memory_regions: &'static [NonNullPtr<Me
 
     let _ = FRAME_ALLOCATOR.lock().insert(frame_allocator);
 
-    println!("[MEMORY] initialized");
+    debug!("[MEMORY] initialized");
 }
 
 unsafe fn active_level_4_table(physical_memory_offset: u64) -> &'static mut PageTable {
@@ -51,7 +51,7 @@ unsafe impl Send for BootInfoFrameAllocator {}
 
 impl BootInfoFrameAllocator {
     pub unsafe fn init(memory_regions: &'static [NonNullPtr<MemmapEntry>]) -> Self {
-        println!(
+        debug!(
             "Available memory {}b",
             memory_regions
                 .iter()
@@ -194,4 +194,42 @@ pub fn translate_phys_addr(addr: PhysAddr) -> VirtAddr {
     let mapper = binding.as_mut().unwrap();
 
     mapper.phys_offset() + addr.as_u64()
+}
+
+pub fn lazy_map(address: VirtAddr) -> bool {
+    if address.as_u64() < crate::allocator::MANAGED_START as u64
+        || address.as_u64() >= crate::allocator::MANAGED_END as u64
+    {
+        return false;
+    }
+
+    let mut binding = super::memory::MAPPER.lock();
+    let mapper = binding.as_mut().unwrap();
+
+    if mapper.translate_addr(address).is_some() {
+        return false;
+    }
+
+    let mut binding = super::memory::FRAME_ALLOCATOR.lock();
+    let frame_allocator = binding.as_mut().unwrap();
+
+    let page = Page::containing_address(address);
+
+    let frame = frame_allocator.allocate_frame().unwrap();
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE;
+    unsafe {
+        mapper
+            .map_to(page, frame, flags, frame_allocator)
+            .unwrap()
+            .flush()
+    };
+
+    super::interrupts::send_flush_tlb();
+
+    unsafe {
+        core::slice::from_raw_parts_mut(page.start_address().as_u64() as *mut u8, page.size() as _)
+            .fill(0);
+    }
+
+    true
 }

@@ -8,4 +8,4 @@ license-file = "../../LICENSE"
 repository = "https://github.com/devsnek/snek_os"
 
 [dependencies]
-pc-keyboard = "0.7"
+pc-keyboard = "0.8"

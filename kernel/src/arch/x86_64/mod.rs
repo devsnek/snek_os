@@ -1,6 +1,4 @@
 mod acpi;
-mod allocator;
-mod framebuffer;
 mod gdt;
 mod hpet;
 mod interrupts;
@@ -8,34 +6,19 @@ mod local;
 mod memory;
 mod pci;
 mod pit;
-mod stack_allocator;
 mod time;
 
-use limine::{FramebufferRequest, HhdmRequest, MemmapRequest, RsdpRequest, SmpInfo, SmpRequest};
+use conquer_once::spin::OnceCell;
+use limine::{HhdmRequest, MemmapRequest, RsdpRequest, SmpInfo, SmpRequest};
 use x86_64::{registers::model_specific::Msr, VirtAddr};
 
-static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 static HHDM: HhdmRequest = HhdmRequest::new(0);
 static MEMMAP: MemmapRequest = MemmapRequest::new(0);
 static RSDP: RsdpRequest = RsdpRequest::new(0);
 static SMP: SmpRequest = SmpRequest::new(0);
 
-#[no_mangle]
-unsafe extern "C" fn _start() -> ! {
-    crate::panic::catch_unwind(start);
-}
-
-fn start() -> ! {
-    e9::println!("hey there :)");
-
+pub fn init() {
     init_sse();
-
-    if let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() {
-        if framebuffer_response.framebuffer_count > 0 {
-            let framebuffer = &framebuffer_response.framebuffers()[0];
-            framebuffer::early_init(framebuffer);
-        }
-    }
 
     set_pid(0);
 
@@ -57,9 +40,9 @@ fn start() -> ! {
         interrupts::init(&acpi_platform_info);
     }
 
-    allocator::init();
+    crate::allocator::init();
 
-    framebuffer::late_init();
+    crate::framebuffer::late_init();
 
     acpi::late_init();
 
@@ -69,19 +52,21 @@ fn start() -> ! {
 
     local::init();
 
+    crate::panic::late_init();
+
     pci::init(physical_memory_offset);
 
-    crate::main();
+    init_smp();
 }
 
 struct ApInfo {
-    gdt: Option<gdt::ApInfo>,
+    gdt: gdt::ApInfo,
     wake: u8,
 }
 
-static mut AP_INFO: Option<Vec<ApInfo>> = None;
+static AP_INFO: OnceCell<Vec<ApInfo>> = OnceCell::uninit();
 
-pub fn init_smp() {
+fn init_smp() {
     let smp = SMP.get_response().get_mut().unwrap();
 
     // allocate on main thread because ap can't set up
@@ -90,13 +75,11 @@ pub fn init_smp() {
         .cpus()
         .iter()
         .map(|_| ApInfo {
-            gdt: Some(gdt::allocate_for_ap()),
+            gdt: gdt::allocate_for_ap(),
             wake: 0,
         })
         .collect();
-    unsafe {
-        AP_INFO = Some(infos);
-    }
+    AP_INFO.try_init_once(|| infos).unwrap();
 
     let bsp_lapic_id = smp.bsp_lapic_id;
     for cpu in smp.cpus().iter_mut() {
@@ -119,12 +102,8 @@ fn start_smp(boot_info: &SmpInfo) -> ! {
 
     set_pid(boot_info.processor_id as _);
 
-    gdt::init_smp(unsafe {
-        AP_INFO.as_mut().unwrap()[boot_info.processor_id as usize]
-            .gdt
-            .take()
-            .unwrap()
-    });
+    let ap_info = AP_INFO.get().unwrap();
+    gdt::init_smp(&ap_info[boot_info.processor_id as usize].gdt);
 
     interrupts::init_smp();
 
@@ -166,11 +145,13 @@ pub fn get_pid() -> u64 {
     pid
 }
 
+pub use acpi::get_pci_config_regions;
 pub use acpi::pci_route_pin;
+pub use acpi::reboot;
 pub use acpi::shutdown;
-pub use framebuffer::_print;
 pub use interrupts::{
-    set_interrupt_dyn, set_interrupt_static, InterruptGuard, InterruptType, TIMER_INTERVAL,
+    set_interrupt_dyn, set_interrupt_msi, set_interrupt_static, InterruptGuard, InterruptType,
+    TIMER_INTERVAL,
 };
 pub use local::GsLocalData as LocalData;
 pub use memory::{map_address, translate_phys_addr, translate_virt_addr};
@@ -186,7 +167,7 @@ pub fn halt_loop() -> ! {
 
 #[inline(always)]
 pub fn enable_interrupts_and_halt() {
-    if let Some(aps) = unsafe { AP_INFO.as_ref() } {
+    if let Ok(aps) = AP_INFO.try_get() {
         let pid = get_pid();
         let addr = (&aps[pid as usize].wake) as *const u8;
 
@@ -215,5 +196,9 @@ pub fn enable_interrupts_and_halt() {
     }
 }
 
-pub use x86_64::instructions::interrupts::disable as disable_interrupts;
+pub fn print(args: core::fmt::Arguments) {
+    if e9::detect() {
+        e9::print(args);
+    }
+}
 pub use x86_64::instructions::interrupts::without_interrupts;

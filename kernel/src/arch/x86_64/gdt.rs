@@ -10,7 +10,7 @@ use x86_64::{
     VirtAddr,
 };
 
-const STACK_SIZE: usize = 4096;
+const STACK_SIZE: usize = 65535;
 
 pub const DOUBLE_FAULT_IST_INDEX: u16 = 0;
 pub const PAGE_FAULT_IST_INDEX: u16 = 1;
@@ -87,7 +87,7 @@ fn load(gdt: &'static GlobalDescriptorTable, selectors: &Selectors) {
     }
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref BP_TSS: TaskStateSegment = tss!({
         static mut STACK: [u8; STACK_SIZE] = [0; STACK_SIZE];
         core::ptr::addr_of!(STACK)
@@ -98,7 +98,7 @@ lazy_static! {
 pub fn init() {
     load(&BP_GDT.0, &BP_GDT.1);
 
-    println!("[GDT] initialized");
+    debug!("[GDT] initialized");
 }
 
 pub struct ApInfo {
@@ -113,6 +113,6 @@ pub fn allocate_for_ap() -> ApInfo {
     ApInfo { gdt, selectors }
 }
 
-pub fn init_smp(info: ApInfo) {
+pub fn init_smp(info: &ApInfo) {
     load(info.gdt, &info.selectors);
 }

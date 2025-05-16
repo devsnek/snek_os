@@ -2,11 +2,3 @@
 name = "e9"
 version = "0.1.0"
 edition = "2021"
-
-[dependencies]
-tracing = { version = "0.1", default-features = false, optional = true }
-tracing-subscriber = { version = "0.3", default-features = false, optional = true }
-spin = { version = "0.9", optional = true }
-
-[features]
-tracing = ["dep:tracing", "dep:tracing-subscriber", "dep:spin"]

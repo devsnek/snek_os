@@ -1,13 +1,16 @@
-use super::{acpi::AcpiAllocator, gdt};
+use super::{acpi::AcpiAllocator, gdt, pci::ConfigRegionAccess};
+use crate::arch::PciDevice;
 use acpi::{
     platform::interrupt::{Apic as ApicInfo, Polarity, TriggerMode},
     InterruptModel, PlatformInfo,
 };
+use bit_field::BitField;
 use core::{
     cmp::Ordering,
-    sync::atomic::{AtomicUsize, Ordering as AtomicOrdering},
+    sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering as AtomicOrdering},
     time::Duration,
 };
+use pci_types::capability::{MsiCapability, MsixCapability, PciCapability};
 use pic8259::ChainedPics;
 use raw_cpuid::CpuId;
 use x2apic::{
@@ -36,6 +39,11 @@ const LOCAL_APIC_SPURIOUS: usize = NUM_VECTORS - 1;
 
 pub const TIMER_INTERVAL: Duration = Duration::from_millis(5);
 
+static FIRST_FREE: AtomicU8 = AtomicU8::new(0);
+const LAST_FREE: u8 = (LOCAL_APIC_TLB_FLUSH - 1) as u8;
+
+static ALSO_HAS_LEGACY_PICS: AtomicBool = AtomicBool::new(false);
+
 macro_rules! prologue {
     () => {
         unsafe { GS::swap() };
@@ -55,12 +63,12 @@ macro_rules! epilogue {
 pub enum InterruptHandler {
     None,
     Static(fn()),
-    Dynamic(Box<dyn Fn()>),
+    Dynamic(Box<dyn FnMut()>),
 }
 
 static mut INTERRUPT_HANDLERS: [InterruptHandler; 224] = [const { InterruptHandler::None }; 224];
 
-lazy_static! {
+lazy_static::lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
 
@@ -89,8 +97,10 @@ lazy_static! {
                     prologue!();
 
                     unsafe {
-                        match &INTERRUPT_HANDLERS[$i - 32] {
-                            InterruptHandler::None => {}
+                        match &mut INTERRUPT_HANDLERS[$i - 32] {
+                            InterruptHandler::None => {
+                                warn!("general interrupt 0x{:02x} with empty handler!", $i);
+                            }
                             InterruptHandler::Static(f) => f(),
                             InterruptHandler::Dynamic(f) => f(),
                         }
@@ -346,7 +356,7 @@ extern "x86-interrupt" fn non_maskable_handler(_stack_frame: InterruptStackFrame
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     prologue!();
 
-    println!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
+    error!("EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);
 
     epilogue!();
 }
@@ -390,7 +400,7 @@ extern "x86-interrupt" fn page_fault_handler(
 
     let address = Cr2::read();
 
-    if !super::allocator::lazy_map(address) {
+    if !super::memory::lazy_map(address) {
         let protv = error_code.contains(PageFaultErrorCode::PROTECTION_VIOLATION);
         let write = error_code.contains(PageFaultErrorCode::CAUSED_BY_WRITE);
         let user = error_code.contains(PageFaultErrorCode::USER_MODE);
@@ -440,7 +450,7 @@ extern "x86-interrupt" fn tlb_flush_interrupt_handler(_stack_frame: InterruptSta
 extern "x86-interrupt" fn error_interrupt_handler(stack_frame: InterruptStackFrame) {
     prologue!();
 
-    println!("ERROR: {:#?}", stack_frame);
+    error!("ERROR: {:#?}", stack_frame);
 
     epilogue!();
 }
@@ -475,13 +485,16 @@ fn get_lapic() -> LocalApic {
         .unwrap()
 }
 
-fn init_lapic() {
+fn disable_pics() {
     unsafe {
         // Disable PIC so it doesn't interfere with LAPIC/IOPICs
         let mut pics = ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET);
+        pics.initialize();
         pics.disable();
     }
+}
 
+fn init_lapic() {
     let mut lapic = get_lapic();
 
     unsafe {
@@ -489,7 +502,7 @@ fn init_lapic() {
         lapic.disable_timer();
     }
 
-    println!("[LAPIC] initialized");
+    debug!("[LAPIC] initialized");
 }
 
 #[derive(Debug)]
@@ -518,6 +531,8 @@ fn get_io_apic(gsi: u8) -> &'static mut IoApicWithInfo {
 }
 
 fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
+    let mut first_free = 0;
+
     for (i, io_apic_info) in apic_info.io_apics.iter().enumerate() {
         let io_apic_virtual_address =
             super::memory::map_address(PhysAddr::new(io_apic_info.address as u64), 4096);
@@ -528,7 +543,9 @@ fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
             io_apic.init(IOAPIC_START + io_apic_info.global_system_interrupt_base as u8);
         }
 
-        for i in 0..unsafe { io_apic.max_table_entry() } {
+        let max_table_entry = unsafe { io_apic.max_table_entry() };
+
+        for i in 0..max_table_entry {
             let mut entry = unsafe { io_apic.table_entry(i) };
             entry.set_flags(entry.flags() | IrqFlags::MASKED);
 
@@ -547,6 +564,10 @@ fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
                 global_system_interrupt_base: io_apic_info.global_system_interrupt_base as _,
             });
         }
+
+        first_free = first_free.max(
+            IOAPIC_START + (io_apic_info.global_system_interrupt_base as u8) + max_table_entry,
+        );
     }
 
     unsafe {
@@ -560,7 +581,9 @@ fn init_ioapic(apic_info: &ApicInfo<&AcpiAllocator>) {
         });
     }
 
-    println!("[IOAPIC] initialized");
+    FIRST_FREE.store(first_free, AtomicOrdering::Relaxed);
+
+    debug!("[IOAPIC] initialized");
 }
 
 fn timer_frequency_hz() -> f64 {
@@ -642,7 +665,7 @@ fn init_timing() {
         lapic.enable_timer();
     }
 
-    println!("[TIMING] initialized");
+    debug!("[TIMING] initialized");
 }
 
 pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
@@ -651,6 +674,11 @@ pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
     };
 
     IDT.load();
+
+    if apic_info.also_has_legacy_pics {
+        ALSO_HAS_LEGACY_PICS.store(true, AtomicOrdering::Relaxed);
+        disable_pics();
+    }
 
     LAPIC_ADDRESS.store(apic_info.local_apic_address as _, AtomicOrdering::Relaxed);
     init_lapic();
@@ -662,32 +690,57 @@ pub fn init(acpi_platform_info: &PlatformInfo<&AcpiAllocator>) {
 
     x86_64::instructions::interrupts::enable();
 
-    println!("[INTERRUPTS] initialized");
+    debug!("[INTERRUPTS] initialized");
 }
 
 pub fn init_smp() {
     IDT.load();
+
+    if ALSO_HAS_LEGACY_PICS.load(AtomicOrdering::Relaxed) {
+        disable_pics();
+    }
+
     init_lapic();
+
     init_timing();
+
     x86_64::instructions::interrupts::enable();
 }
 
 #[must_use]
-pub struct InterruptGuard {
-    gsi: u8,
+pub enum InterruptGuard {
+    IoApic(u8),
+    Msi(MsiCapability, u8),
+    MsiX(MsixCapability, u8),
 }
 
 impl Drop for InterruptGuard {
     fn drop(&mut self) {
-        let io_apic = get_io_apic(self.gsi);
-        let vector = self.gsi - io_apic.global_system_interrupt_base;
+        let gsi = match *self {
+            Self::IoApic(gsi) => {
+                let io_apic = get_io_apic(gsi);
+                let vector = gsi - io_apic.global_system_interrupt_base;
+
+                unsafe {
+                    io_apic.io_apic.disable_irq(vector);
+                }
+
+                gsi
+            }
+            Self::Msi(cap, gsi) => {
+                let access = ConfigRegionAccess::default();
+                cap.set_enabled(false, &access);
+                gsi
+            }
+            Self::MsiX(mut cap, gsi) => {
+                let access = ConfigRegionAccess::default();
+                cap.set_enabled(false, &access);
+                gsi
+            }
+        };
 
         unsafe {
-            io_apic.io_apic.disable_irq(vector);
-        }
-
-        unsafe {
-            INTERRUPT_HANDLERS[self.gsi as usize] = InterruptHandler::None;
+            INTERRUPT_HANDLERS[gsi as usize] = InterruptHandler::None;
         }
     }
 }
@@ -703,8 +756,90 @@ pub fn set_interrupt_static(gsi: u8, itype: InterruptType, f: fn()) -> Interrupt
     set_interrupt(gsi, itype, InterruptHandler::Static(f))
 }
 
-pub fn set_interrupt_dyn(gsi: u8, itype: InterruptType, f: Box<dyn Fn()>) -> InterruptGuard {
+pub fn set_interrupt_dyn(gsi: u8, itype: InterruptType, f: Box<dyn FnMut()>) -> InterruptGuard {
     set_interrupt(gsi, itype, InterruptHandler::Dynamic(f))
+}
+
+pub fn set_interrupt_msi(header: PciDevice, f: Box<dyn FnMut()>) -> Option<InterruptGuard> {
+    let first_free = FIRST_FREE.load(AtomicOrdering::Relaxed);
+    let mut gsi = 0u8;
+    for i in first_free..=LAST_FREE {
+        if matches!(
+            unsafe { &INTERRUPT_HANDLERS[(i - 32) as usize] },
+            InterruptHandler::None
+        ) {
+            gsi = i;
+            break;
+        }
+    }
+    if gsi == 0 {
+        return None;
+    }
+
+    let mut mapped = None;
+    for cap in header.capabilities {
+        match cap {
+            PciCapability::Msi(cap) => {
+                let access = ConfigRegionAccess::default();
+
+                let mut mar = 0u64;
+                mar.set_bit(2, false);
+                mar.set_bit(3, false);
+                mar.set_bits(12..20, 0);
+                mar.set_bits(20..32, 0x0FEE);
+
+                let mut mdr = 0u32;
+                mdr.set_bits(0..8, gsi as _);
+
+                cap.set_message_info(mar, mdr, &access);
+                cap.set_enabled(true, &access);
+
+                mapped = Some(InterruptGuard::Msi(cap, gsi));
+                break;
+            }
+            PciCapability::MsiX(mut cap) => {
+                let access = ConfigRegionAccess::default();
+
+                let mut mar = 0u32;
+                mar.set_bit(2, false);
+                mar.set_bit(3, false);
+                mar.set_bits(12..20, 0);
+                mar.set_bits(20..32, 0x0FEE);
+
+                let mut mdr = 0u32;
+                mdr.set_bits(0..8, gsi as _);
+                mdr.set_bits(8..11, 0b000);
+                mdr.set_bit(14, false);
+                mdr.set_bit(15, false);
+
+                let bar = header.bars[cap.table_bar() as usize].unwrap();
+                let (addr, size) = bar.unwrap_mem();
+                let addr = super::map_address(PhysAddr::new(addr as _), size).as_mut_ptr::<u32>();
+                let addr = unsafe { addr.byte_add(cap.table_offset() as _) };
+
+                unsafe {
+                    addr.byte_add(0x00).write_volatile(mar);
+                    addr.byte_add(0x04).write_volatile(0);
+                    addr.byte_add(0x08).write_volatile(mdr);
+                    addr.byte_add(0x0C).write_volatile(0);
+                }
+
+                cap.set_enabled(true, &access);
+
+                mapped = Some(InterruptGuard::MsiX(cap, gsi));
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if mapped.is_some() {
+        unsafe {
+            INTERRUPT_HANDLERS[(gsi - 32) as usize] = InterruptHandler::Dynamic(f);
+        }
+    }
+
+    mapped
 }
 
 fn set_interrupt(mut gsi: u8, mut itype: InterruptType, h: InterruptHandler) -> InterruptGuard {
@@ -761,7 +896,7 @@ fn set_interrupt(mut gsi: u8, mut itype: InterruptType, h: InterruptHandler) -> 
         io_apic.io_apic.enable_irq(vector);
     }
 
-    InterruptGuard { gsi }
+    InterruptGuard::IoApic(gsi)
 }
 
 pub fn send_flush_tlb() {

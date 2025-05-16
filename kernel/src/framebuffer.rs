@@ -1,8 +1,10 @@
 use core::fmt::Write;
 use embedded_graphics::{pixelcolor::Rgb888, prelude::*, primitives::Rectangle};
-use limine::Framebuffer;
+use limine::FramebufferRequest;
 use noto_sans_mono_bitmap::{get_raster, FontWeight, RasterHeight, RasterizedChar};
 use spin::Mutex;
+
+static FRAMEBUFFER: FramebufferRequest = FramebufferRequest::new(0);
 
 #[derive(Debug, Clone, Copy)]
 pub enum PixelFormat {
@@ -12,7 +14,7 @@ pub enum PixelFormat {
     Unknown,
 }
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref DISPLAY: Mutex<Display> = Mutex::new(Display {
         buffer: &mut [],
         cache: None,
@@ -23,10 +25,19 @@ lazy_static! {
         stride: 0,
         x_pos: BORDER_PADDING,
         y_pos: BORDER_PADDING,
+        last_char_width: 0,
     });
 }
 
-pub fn early_init(info: &Framebuffer) {
+pub fn early_init() {
+    let Some(framebuffer_response) = FRAMEBUFFER.get_response().get() else {
+        return;
+    };
+    if framebuffer_response.framebuffer_count == 0 {
+        return;
+    }
+    let info = &framebuffer_response.framebuffers()[0];
+
     let mut display = DISPLAY.lock();
     display.buffer =
         unsafe { core::slice::from_raw_parts_mut(info.address.as_ptr().unwrap(), info.size()) };
@@ -44,8 +55,8 @@ pub fn early_init(info: &Framebuffer) {
         (0x00, 0x00, 0x00) => PixelFormat::U8,
         _ => PixelFormat::Unknown,
     };
-    display.clear();
 
+    display.clear();
     display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
 }
 
@@ -54,8 +65,13 @@ pub fn late_init() {
     display.cache = Some(display.buffer.to_owned());
 }
 
-#[doc(hidden)]
-pub fn _print(args: core::fmt::Arguments) {
+pub fn logo() {
+    let mut display = DISPLAY.lock();
+    display.clear();
+    display.write_rgba(include_bytes!(concat!(env!("OUT_DIR"), "/logo_text.rgba")));
+}
+
+pub fn print(args: core::fmt::Arguments) {
     crate::arch::without_interrupts(|| {
         DISPLAY.lock().write_fmt(args).unwrap();
     });
@@ -85,6 +101,7 @@ pub struct Display {
     pixel_format: PixelFormat,
     x_pos: usize,
     y_pos: usize,
+    last_char_width: usize,
 }
 
 unsafe impl Send for Display {}
@@ -190,10 +207,20 @@ impl Display {
         }
     }
 
-    fn write_char(&mut self, c: char) {
+    pub fn write_char(&mut self, c: char) {
         match c {
             '\n' => self.newline(),
             '\r' => self.carriage_return(),
+            '\u{0008}' => {
+                if self.x_pos > BORDER_PADDING {
+                    self.x_pos -= self.last_char_width;
+                    for y in 0..LINE_HEIGHT {
+                        for x in 0..self.last_char_width {
+                            self.write_pixel(self.x_pos + x, self.y_pos + y, 0, 0, 0, 255);
+                        }
+                    }
+                }
+            }
             c => {
                 let rendered_char = get_char_raster(c);
                 let width = rendered_char.width();
@@ -213,8 +240,15 @@ impl Display {
                     }
                 }
 
+                self.last_char_width = width;
                 self.x_pos += width;
             }
+        }
+    }
+
+    pub fn write_str(&mut self, s: &str) {
+        for c in s.chars() {
+            self.write_char(c);
         }
     }
 
@@ -254,9 +288,7 @@ impl Display {
 
 impl Write for Display {
     fn write_str(&mut self, s: &str) -> core::fmt::Result {
-        for c in s.chars() {
-            self.write_char(c);
-        }
+        Display::write_str(self, s);
         Ok(())
     }
 }

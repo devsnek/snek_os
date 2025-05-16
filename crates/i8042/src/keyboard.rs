@@ -117,12 +117,12 @@ impl Keyboard {
                             1 => SomeKeyboard::Set1(PcKeyboard::new(
                                 ScancodeSet1::new(),
                                 Us104Key,
-                                HandleControl::Ignore,
+                                HandleControl::MapLettersToUnicode,
                             )),
                             2 => SomeKeyboard::Set2(PcKeyboard::new(
                                 ScancodeSet2::new(),
                                 Us104Key,
-                                HandleControl::Ignore,
+                                HandleControl::MapLettersToUnicode,
                             )),
                             3 => {
                                 self.state = State::Disabled;

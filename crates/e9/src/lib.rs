@@ -1,9 +1,16 @@
 #![no_std]
 
-#[cfg(feature = "tracing")]
-pub mod tracing;
+pub fn detect() -> bool {
+    let mut b: u8;
+    unsafe {
+        core::arch::asm!(r#"
+        in al, 0xe9
+        "#, out("al") b);
+    }
+    b == 0xe9
+}
 
-fn write_byte(b: u8) {
+pub fn write_byte(b: u8) {
     if b == b'\n' {
         write_byte(b'\r');
     }
@@ -14,18 +21,7 @@ fn write_byte(b: u8) {
     }
 }
 
-#[doc(hidden)]
-pub fn _print(args: core::fmt::Arguments) {
-    let mut b: u8;
-    unsafe {
-        core::arch::asm!(r#"
-        in al, 0xe9
-        "#, out("al") b);
-    }
-    if b != 0xe9 {
-        return;
-    }
-
+pub fn print(args: core::fmt::Arguments) {
     if let Some(s) = args.as_str() {
         for b in s.bytes() {
             write_byte(b);
@@ -42,34 +38,4 @@ pub fn _print(args: core::fmt::Arguments) {
         }
         core::fmt::write(&mut Writer, args).unwrap();
     }
-}
-
-#[macro_export]
-macro_rules! print {
-    ($($arg:tt)*) => ($crate::_print(format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! println {
-    () => ($crate::print!("\n"));
-    ($($arg:tt)*) => ($crate::print!("{}\n", format_args!($($arg)*)));
-}
-
-#[macro_export]
-macro_rules! dbg {
-    () => {
-        $crate::println!("[{}:{}]", file!(), line!());
-    };
-    ($val:expr) => {
-        match $val {
-            tmp => {
-                $crate::println!("[{}:{}] {} = {:#?}", file!(), line!(), stringify!($val), &tmp);
-                tmp
-            }
-        }
-    };
-    ($val:expr,) => { $crate::dbg!($val) };
-    ($($val:expr),+ $(,)?) => {
-        ($($crate::dbg!($val)),+,)
-    };
 }

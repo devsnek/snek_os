@@ -25,8 +25,17 @@ impl Inner {
         self.slabs.iter_mut().find(|slab| slab.size >= needed)
     }
 
-    fn used(&self) -> usize {
-        self.slabs.iter().fold(0, |acc, s| s.used + acc) + self.fallback.used()
+    fn stats(&self) -> [[usize; 2]; 8] {
+        [
+            [self.slabs[0].used(), self.slabs[0].size()],
+            [self.slabs[1].used(), self.slabs[1].size()],
+            [self.slabs[2].used(), self.slabs[2].size()],
+            [self.slabs[3].used(), self.slabs[3].size()],
+            [self.slabs[4].used(), self.slabs[4].size()],
+            [self.slabs[5].used(), self.slabs[5].size()],
+            [self.slabs[6].used(), self.slabs[6].size()],
+            [self.fallback.used(), self.fallback.size()],
+        ]
     }
 }
 
@@ -37,12 +46,12 @@ impl Allocator {
                 start: 0,
                 size: 0,
                 slabs: [
+                    SlabAllocator::new(16),
                     SlabAllocator::new(32),
                     SlabAllocator::new(64),
                     SlabAllocator::new(128),
                     SlabAllocator::new(256),
                     SlabAllocator::new(512),
-                    SlabAllocator::new(1024),
                     SlabAllocator::new(2048),
                 ],
                 fallback: LinkedListAllocator::empty(),
@@ -65,8 +74,8 @@ impl Allocator {
         }
     }
 
-    pub fn used(&self) -> usize {
-        self.inner.lock().used()
+    pub fn stats(&self) -> [[usize; 2]; 8] {
+        self.inner.lock().stats()
     }
 }
 
@@ -98,6 +107,7 @@ unsafe impl GlobalAlloc for Allocator {
     }
 }
 
+#[repr(C)]
 struct SlabCell {
     next: usize,
 }
@@ -123,9 +133,18 @@ impl SlabAllocator {
     }
 
     fn init(&mut self, start: usize, size: usize) {
+        assert!((self.start % self.size) == 0);
         self.start = start;
         self.end = start + size;
         self.next = start;
+    }
+
+    fn used(&self) -> usize {
+        self.used
+    }
+
+    fn size(&self) -> usize {
+        self.end - self.start
     }
 
     unsafe fn alloc(&mut self, layout: Layout) -> *mut u8 {

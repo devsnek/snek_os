@@ -1,16 +1,14 @@
 use conquer_once::spin::OnceCell;
 use core::{future::poll_fn, task::Poll};
 use crossbeam_queue::ArrayQueue;
-use futures_util::task::AtomicWaker;
+use futures::task::AtomicWaker;
 use i8042::{Change, DecodedKey, Driver8042, Irq, MouseState};
-
-#[cfg(target_arch = "x86_64")]
+use spin::Mutex;
 use x86_64::instructions::port::Port;
 
 #[derive(Debug)]
 struct DriverImpl;
 
-#[cfg(target_arch = "x86_64")]
 impl i8042::Impl for DriverImpl {
     fn read_data(&mut self) -> u8 {
         unsafe { Port::new(0x60).read() }
@@ -29,7 +27,7 @@ impl i8042::Impl for DriverImpl {
     }
 }
 
-static mut DRIVER: Driver8042<DriverImpl> = Driver8042::new(DriverImpl);
+static DRIVER: Mutex<Driver8042<DriverImpl>> = Mutex::new(Driver8042::new(DriverImpl));
 
 static KEY_QUEUE: OnceCell<ArrayQueue<DecodedKey>> = OnceCell::uninit();
 static KEY_WAKER: AtomicWaker = AtomicWaker::new();
@@ -38,7 +36,7 @@ static MOUSE_QUEUE: OnceCell<ArrayQueue<MouseState>> = OnceCell::uninit();
 static MOUSE_WAKER: AtomicWaker = AtomicWaker::new();
 
 pub fn interrupt(irq: Irq) {
-    if let Some(change) = unsafe { DRIVER.interrupt(irq) } {
+    if let Some(change) = DRIVER.lock().interrupt(irq) {
         match change {
             Change::Keyboard(key) => {
                 if let Ok(queue) = KEY_QUEUE.try_get() {
@@ -60,7 +58,7 @@ pub fn interrupt(irq: Irq) {
 
 pub fn init() {
     unsafe {
-        DRIVER.init().unwrap();
+        DRIVER.lock().init().unwrap();
     }
 
     KEY_QUEUE.try_init_once(|| ArrayQueue::new(32)).unwrap();

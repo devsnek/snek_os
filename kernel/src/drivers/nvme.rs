@@ -1,15 +1,20 @@
 use super::dma::Dma;
 use super::PciDevice;
+use crate::arch::PciCommand;
 use crate::arch::{map_address, translate_virt_addr};
 use core::sync::atomic::{AtomicUsize, Ordering};
 use pci_types::Bar;
 use x86_64::{PhysAddr, VirtAddr};
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 enum Error {
+    #[error("Unknown bar")]
     UnknownBar,
+    #[error("Not supported")]
     NotSupported,
+    #[error("Fatal")]
     Fatal,
+    #[error("Command error: {0}")]
     CommandError(u16),
 }
 
@@ -309,8 +314,7 @@ struct Controller {
 
 impl Controller {
     fn new(device: &PciDevice) -> Result<Self, Error> {
-        device.enable_bus_mastering();
-        device.enable_mmio();
+        device.set_command(PciCommand::IO_SPACE | PciCommand::BUS_MASTER | PciCommand::MEMORY_SPACE);
 
         let (registers_addr, registers_size) = match device.bars[0] {
             Some(Bar::Memory64 { address, size, .. }) => (PhysAddr::new(address), size as usize),
@@ -444,7 +448,7 @@ impl Controller {
                     continue;
                 }
 
-                println!("{nsid}");
+                info!("nsid={nsid}");
 
                 let identity = Dma::<IdentifyNamespace>::new_zeroed(4096);
                 let identify = IdentifyCommand {
@@ -472,7 +476,7 @@ impl Controller {
                 let max_lbas = 1 << (max_transfer_shift - lba_shift as usize);
                 let max_prps = (max_lbas * (1 << lba_shift)) / 4096;
 
-                println!(
+                info!(
                     "nvme: identified namespace (blocks={}, block_size={}, size={})",
                     blocks,
                     block_size,
@@ -485,14 +489,14 @@ impl Controller {
     }
 }
 
-pub fn init(device: &PciDevice) -> bool {
+pub fn init(device: &PciDevice) -> Result<bool, anyhow::Error> {
     if device.class != 0x1 || device.sub_class != 0x8 {
-        return false;
+        return Ok(false);
     }
 
-    Controller::new(device).unwrap();
+    Controller::new(device)?;
 
-    true
+    Ok(true)
 }
 
 #[repr(u8)]

@@ -1,9 +1,10 @@
-use crate::arch::{translate_phys_addr, translate_virt_addr, PciDevice};
+use crate::arch::{translate_phys_addr, translate_virt_addr, PciCommand, PciDevice};
 use alloc::{
     alloc::{alloc, dealloc, Layout},
     sync::Arc,
 };
 use core::{marker::PhantomData, pin::Pin};
+use futures::task::AtomicWaker;
 use pci_types::Bar;
 use spin::Mutex;
 use x86_64::{PhysAddr, VirtAddr};
@@ -156,10 +157,14 @@ bitflags::bitflags! {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(thiserror::Error, Debug)]
 enum Error {
+    #[error("unknown bar")]
     UnknownBar,
+    #[error("no eeprom")]
     NoEeprom,
+    #[error("route gsi failed {0:?}")]
+    RouteGsi(anyhow::Error),
 }
 
 #[derive(Debug)]
@@ -303,7 +308,7 @@ impl Registers {
 
 struct E1000 {
     registers: Registers,
-    address: smoltcp::wire::EthernetAddress,
+    address: [u8; 6],
 
     tx_cur: usize,
     tx_ring: *mut [TxDescriptor; TX_DESC_NUM as usize],
@@ -312,12 +317,13 @@ struct E1000 {
     rx_ring: *mut [RxDescriptor; RX_DESC_NUM as usize],
 
     interrupt_guard: Option<crate::arch::InterruptGuard>,
+
+    waker: AtomicWaker,
 }
 
 impl E1000 {
     fn new(header: &PciDevice) -> Result<Pin<Box<Self>>, Error> {
-        header.enable_bus_mastering();
-        header.enable_mmio();
+        header.set_command(header.command() | PciCommand::BUS_MASTER | PciCommand::MEMORY_SPACE);
 
         let registers_addr = match header.bars[0] {
             Some(Bar::Memory64 { address, .. }) => PhysAddr::new(address),
@@ -335,11 +341,11 @@ impl E1000 {
             return Err(Error::NoEeprom);
         }
 
-        let mut address = smoltcp::wire::EthernetAddress([0; 6]);
+        let mut address = [0; 6];
         for i in 0..3 {
             let x = registers.read_eeprom(i) as u16;
-            address.0[i as usize * 2] = (x & 0xff) as u8;
-            address.0[i as usize * 2 + 1] = (x >> 8) as u8;
+            address[i as usize * 2] = (x & 0xff) as u8;
+            address[i as usize * 2 + 1] = (x >> 8) as u8;
         }
 
         let tx_ring = {
@@ -453,12 +459,13 @@ impl E1000 {
             rx_ring: rx_ring as _,
 
             interrupt_guard: None,
+            waker: AtomicWaker::new(),
         });
 
         let this_raw = &mut *this as *mut E1000;
         let mut this = Box::into_pin(this);
 
-        let gsi = crate::arch::pci_route_pin(header);
+        let gsi = crate::arch::pci_route_pin(header).map_err(|e| Error::RouteGsi(e.into()))?;
         this.interrupt_guard = Some(crate::arch::set_interrupt_dyn(
             gsi,
             crate::arch::InterruptType::LevelLow,
@@ -484,6 +491,8 @@ impl E1000 {
 
     fn handle_irq(&mut self) {
         InterruptFlags::from_bits_retain(self.registers.read(Register::ICause));
+
+        self.waker.wake();
     }
 
     fn send(&mut self, packet: &[u8]) {
@@ -516,6 +525,11 @@ impl E1000 {
                 desc.length as usize,
             ),
         ))
+    }
+
+    fn has_recv(&mut self) -> bool {
+        let id = self.rx_cur;
+        self.rx_ring()[id].status.contains(RStatus::DD)
     }
 
     fn recv_end(&mut self, id: usize) {
@@ -565,12 +579,6 @@ pub struct Driver {
     inner: Arc<Mutex<Pin<Box<E1000>>>>,
 }
 
-impl crate::net::Driver for Driver {
-    fn address(&self) -> smoltcp::wire::HardwareAddress {
-        crate::arch::without_interrupts(|| self.inner.lock().address.into())
-    }
-}
-
 pub struct TxToken {
     inner: Arc<Mutex<Pin<Box<E1000>>>>,
 }
@@ -599,9 +607,9 @@ pub struct RxToken<'a> {
 impl<'a> smoltcp::phy::RxToken for RxToken<'a> {
     fn consume<R, F>(self, f: F) -> R
     where
-        F: FnOnce(&mut [u8]) -> R,
+        F: FnOnce(&[u8]) -> R,
     {
-        let result = f(unsafe { &mut *self.buffer });
+        let result = f(unsafe { &*self.buffer });
         crate::arch::without_interrupts(|| {
             self.inner.lock().recv_end(self.id);
         });
@@ -610,10 +618,12 @@ impl<'a> smoltcp::phy::RxToken for RxToken<'a> {
 }
 
 impl smoltcp::phy::Device for Driver {
-    type RxToken<'a> = RxToken<'a>
+    type RxToken<'a>
+        = RxToken<'a>
     where
         Self: 'a;
-    type TxToken<'a> = TxToken
+    type TxToken<'a>
+        = TxToken
     where
         Self: 'a;
 
@@ -645,25 +655,41 @@ impl smoltcp::phy::Device for Driver {
     }
 
     fn capabilities(&self) -> smoltcp::phy::DeviceCapabilities {
-        let mut capabilities = smoltcp::phy::DeviceCapabilities::default();
-        capabilities.medium = smoltcp::phy::Medium::Ethernet;
-        capabilities.max_transmission_unit = 1500;
-        capabilities.max_burst_size = Some(RX_DESC_NUM as _);
-        capabilities
+        let mut caps = smoltcp::phy::DeviceCapabilities::default();
+        caps.medium = smoltcp::phy::Medium::Ethernet;
+        caps.max_transmission_unit = 1500;
+        caps.max_burst_size = Some(RX_DESC_NUM as _);
+        caps
     }
 }
 
-pub fn init(header: &PciDevice) -> bool {
-    if header.vendor_id != 0x8086 || header.device_id != 0x100e {
-        return false;
+impl crate::net::Driver for Driver {
+    fn address(&self) -> smoltcp::wire::HardwareAddress {
+        smoltcp::wire::EthernetAddress(self.inner.lock().address).into()
     }
 
-    let e1000 = E1000::new(header).unwrap();
+    fn poll(&self, cx: &mut core::task::Context) -> core::task::Poll<()> {
+        let mut inner = self.inner.lock();
+        inner.waker.register(cx.waker());
+        if inner.has_recv() {
+            core::task::Poll::Ready(())
+        } else {
+            core::task::Poll::Pending
+        }
+    }
+}
+
+pub fn init(header: &PciDevice) -> Result<bool, anyhow::Error> {
+    if header.vendor_id != 0x8086 || header.device_id != 0x100e {
+        return Ok(false);
+    }
+
+    let e1000 = E1000::new(header)?;
     let driver = Driver {
         inner: Arc::new(Mutex::new(e1000)),
     };
 
     crate::net::register(driver);
 
-    true
+    Ok(true)
 }

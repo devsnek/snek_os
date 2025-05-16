@@ -7,35 +7,48 @@ edition = "2021"
 spin = "0.9"
 lazy_static = { version = "1.4", features = ["spin_no_std"] }
 crossbeam-queue = { version = "0.3", default-features = false, features = ["alloc"] }
-futures = { version = "0.3", default-features = false, features = ["alloc"] }
-futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
+futures = { version = "0.3", default-features = false, features = ["alloc", "async-await"] }
 conquer-once = { version = "0.3", default-features = false }
 noto-sans-mono-bitmap = { version = "0.2", default-features = false, features = ["size_16", "regular", "unicode-basic-latin", "unicode-specials"] }
 mycelium-bitfield = { workspace = true }
-maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
+maitake = { git = "https://github.com/hawkw/mycelium.git", rev = "87448c5" }
 rand_xoshiro = "0.6"
 rand = { version = "0.8", default-features = false, features = ["getrandom"] }
 getrandom = { version = "0.2", default-features = false, features = ["rdrand"] }
 pci-ids = "0.2"
-pci_types = "0.5"
+pci_types = "0.10"
 rustc-demangle = "0.1"
 snalloc = { path = "../crates/snalloc" }
 embedded-graphics = "0.8"
 pin-project = "1.1"
 bitflags = "2.4"
-smoltcp = { version = "0.11", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ethernet", "socket-tcp", "socket-icmp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns"] }
 chrono = { version = "0.4", default-features = false }
 libm = "0.2"
 unique = "0.9"
-wasmi = { version = "0.31", default-features = false }
 xmas-elf = "0.9"
-unwinding = { git = "https://github.com/nbdd0121/unwinding.git", rev = "d7cd46e009ed1dbc762dbaaf4402f57973b300bb", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
+unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic", "dwarf-expr", "hide-trace"] }
 limine = "0.1"
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-core.workspace = true
+hashbrown = { version = "0.15" }
+thiserror = { version = "2.0", default-features = false }
+log.workspace = true
+smoltcp = { path = "../../smoltcp", default-features = false, features = ["alloc", "proto-ipv4", "proto-ipv6", "socket", "medium-ip", "medium-ethernet", "socket-tcp", "socket-icmp", "async", "proto-dhcpv4", "proto-dns", "socket-dhcpv4", "socket-dns", "socket-mdns", "log"] }
+async-channel = { version = "2.3", default-features = false }
+url = { version = "2.5", default-features = false }
+addr2line = { version = "0.24", default-features = false, features = ["rustc-demangle"] }
+anyhow = { version = "1", default-features = false }
+wasmi = { version = "0.45", default-features = false }
+httparse = { version = "1.10", default-features = false }
+http = { path = "../../http", default-features = false } #{ version = "1.3", default-features = false }
+virtio-drivers = { path = "../../virtio-drivers" }#"0.11"
+bit_field = "0.10"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.14"
 pic8259 = "0.10"
-acpi = { git = "https://github.com/devsnek/acpi.git", rev = "4d8317aca9b484e83e545e5db30907c40ab22964" }
+acpi = { git = "https://github.com/devsnek/acpi.git", rev = "5ac0db01e47b549bdbb5dc16dcc75e5ea4c5d870" }
 os_units = "0.4"
 x2apic = "0.4"
 raw-cpuid = "10.6"
@@ -43,7 +56,8 @@ cmos = { path = "../crates/cmos" }
 i8042 = { path = "../crates/i8042" }
 e9 = { path = "../crates/e9" }
 hpet = { path = "../crates/hpet" }
-lai = { git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
+lai = { path = "../../lai-rs" }#{ git = "https://github.com/devsnek/lai-rs.git", rev = "406e271e5ae24390cce50165ea1cdd4841e308e4" }
+#acpica-bindings = "0.1"
 
 [build-dependencies]
 image = { version = "0.24", default-features = false, features = ["png"] }

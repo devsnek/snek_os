@@ -11,4 +11,12 @@ members = [
 exclude = ["programs"]
 
 [workspace.dependencies]
-mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "3f509037380c4ef5f1b9dd3e148d4e7450cd44e5" }
+mycelium-bitfield = { git = "https://github.com/hawkw/mycelium.git", rev = "82284c465ee6aa0b1468854def75ced2b09e4fc7" }
+tracing = { git = "https://github.com/tokio-rs/tracing", default-features = false }
+tracing-subscriber = { git = "https://github.com/tokio-rs/tracing", default-features = false }
+tracing-core = { git = "https://github.com/tokio-rs/tracing", default-features = false }
+log = { version = "0.4", default-features = false }
+
+[profile.release]
+debug = 1
+

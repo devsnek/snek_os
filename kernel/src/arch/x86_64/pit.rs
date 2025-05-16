@@ -28,7 +28,7 @@ use x86_64::instructions::port::Port;
 
 const BASE_FREQUENCY_HZ: usize = 1193182;
 
-lazy_static! {
+lazy_static::lazy_static! {
     pub static ref PIT: Mutex<Pit> = {
         core::mem::forget(set_interrupt_static(0, InterruptType::EdgeHigh, on_tick));
         Mutex::new(Pit::new())

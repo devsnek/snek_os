@@ -19,7 +19,9 @@ all: $(ISO)
 
 $(OVMF):
 	mkdir -p out/ovmf
-	cd out/ovmf && curl -Lo OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
+	curl -Lo out/ovmf/OVMF.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd
+	curl -Lo out/ovmf/OVMF_CODE.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF_CODE.fd
+	curl -Lo out/ovmf/OVMF_VARS.fd https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF_VARS.fd
 
 $(LIMINE_BIN):
 	mkdir -p out
@@ -29,7 +31,7 @@ $(LIMINE_BIN):
 $(KERNEL): FORCE
 	cargo build --profile $(CARGO_PROFILE) --package snek_kernel --target $(TARGET) --config kernel/config.toml
 
-$(ISO): $(KERNEL) $(OVMF) $(LIMINE_BIN) $(LIMINE_CFG)
+$(ISO): $(KERNEL) $(LIMINE_BIN) $(LIMINE_CFG)
 	rm -rf out/iso_root
 	mkdir -p out/iso_root
 	mkdir -p out/$(TARGET)/$(BUILD)
@@ -47,7 +49,12 @@ $(ISO): $(KERNEL) $(OVMF) $(LIMINE_BIN) $(LIMINE_CFG)
 
 FORCE: ;
 
-.PHONY: clean format clippy run
+.PHONY: clean format clippy run kernel iso
+
+kernel: $(KERNEL)
+
+iso: $(ISO)
+
 clean:
 	cargo clean
 	rm -rf out
@@ -55,21 +62,22 @@ clean:
 fmt:
 	cargo fmt
 
-clippy:
+lint:
 	cargo clippy --package snek_kernel --target $(TARGET) --config kernel/config.toml
 
-run: $(ISO)
+run: $(ISO) $(OVMF)
 	"qemu-system-$(TARGET_ARCH)" \
-		-enable-kvm \
+		-machine q35 \
+		-accel kvm \
 		-cpu host \
-		-M q35 \
 		-debugcon /dev/stdout \
 		-smp 4 \
 		-m 8G \
 		-rtc base=utc,clock=host \
-		-netdev user,id=u1 -device e1000,netdev=u1 \
-		-drive file=disk.img,if=none,id=nvm,format=raw \
+		-drive file=nvm.img,if=none,id=nvm,format=raw \
 		-device nvme,serial=deadbeef,drive=nvm \
-		-audio model=hda,driver=pa \
-		-bios $(OVMF) \
+		-netdev user,id=u1,ipv6=on,ipv4=on -device virtio-net,netdev=u1 \
+		-device vhost-vsock-pci,guest-cid=3 \
+		-drive format=raw,if=pflash,readonly=on,file=out/ovmf/OVMF_CODE.fd \
+		-drive format=raw,if=pflash,file=out/ovmf/OVMF_VARS.fd \
 		-drive file=$(ISO),format=raw

@@ -10,6 +10,7 @@ pub struct Dma<T: ?Sized> {
 
 impl<T: Sized> Dma<T> {
     pub fn new_zeroed(align: usize) -> Dma<T> {
+        assert!(align >= core::mem::align_of::<T>());
         let layout = Layout::new::<T>().align_to(align).unwrap();
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
@@ -26,6 +27,7 @@ impl<T: Sized> Dma<T> {
 
 impl<T> Dma<[T]> {
     pub fn new_zeroed_slice(len: usize, align: usize) -> Dma<[T]> {
+        assert!(align >= core::mem::align_of::<T>());
         let layout = Layout::array::<T>(len).unwrap().align_to(align).unwrap();
         let ptr = unsafe { alloc_zeroed(layout) };
         if ptr.is_null() {
@@ -42,6 +44,12 @@ impl<T: ?Sized> Dma<T> {
         translate_virt_addr(VirtAddr::new(self.dma.as_ptr() as *mut () as _))
             .unwrap()
             .as_u64() as _
+    }
+
+    pub fn leak(self) -> *mut T {
+        let ptr = self.dma.as_ptr();
+        core::mem::forget(self);
+        ptr
     }
 }
 
